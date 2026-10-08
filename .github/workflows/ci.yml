@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned uv
+        run: python -m pip install uv==0.11.7
+
+      - name: Install dependencies
+        run: uv sync --frozen
+        env:
+          UV_PYTHON: "3.12"
+
+      - name: Lint
+        run: uv run ruff check
+
+      - name: Test
+        run: uv run pytest -q
+
+      - name: Build the API image
+        run: docker build -f docker/Dockerfile.api -t vrp-api:ci .
+
+      - name: Check health and readiness
+        run: |
+          set -euo pipefail
+          docker run -d --name vrp-api-ci -p 8000:8000 vrp-api:ci
+          for _ in $(seq 1 20); do
+            health="$(curl -fsS http://127.0.0.1:8000/health || true)"
+            ready="$(curl -fsS http://127.0.0.1:8000/ready || true)"
+            if [ "$health" = '{"status":"ok"}' ] && [ "$ready" = '{"ready":false}' ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs vrp-api-ci
+          exit 1
