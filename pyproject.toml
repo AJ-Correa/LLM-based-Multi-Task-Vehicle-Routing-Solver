@@ -7,10 +7,15 @@ name = "vrp-decision-service"
 version = "0.0.0"
 description = "LLM-based VRP decision support"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2",
+    "uvicorn>=0.32",
+]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2",
     "pytest>=8",
     "ruff>=0.8",
 ]

@@ -1,4 +1,4 @@
-.PHONY: test lint api
+.PHONY: test lint api docker
 
 test:
 	uv run pytest -q
@@ -6,6 +6,8 @@ test:
 lint:
 	uv run ruff check
 
-# The application module arrives in the next commit. This target is the command CI and the README will use.
 api:
 	uv run uvicorn vrp_service.serving.app:app --host 0.0.0.0 --port 8000
+
+docker:
+	docker compose -f docker/docker-compose.yml up --build
