@@ -60,6 +60,21 @@ def load_policy(checkpoint_path: str, source_root: str, device: str = "cpu") -> 
     return policy
 
 
+def _alias_legacy_specs() -> None:
+    """Older checkpoints name spec classes that later releases renamed."""
+    import torchrl.data.tensor_specs as specs
+
+    renamed = {
+        "CompositeSpec": "Composite",
+        "BoundedTensorSpec": "Bounded",
+        "UnboundedContinuousTensorSpec": "Unbounded",
+        "UnboundedDiscreteTensorSpec": "UnboundedDiscrete",
+    }
+    for old, new in renamed.items():
+        if not hasattr(specs, old) and hasattr(specs, new):
+            setattr(specs, old, getattr(specs, new))
+
+
 def _cost(reward: float) -> float:
     cost = -float(reward)
     if not math.isfinite(cost) or cost < 0:
@@ -133,8 +148,10 @@ def _forward(
         generator_params=config["env"]["generator_params"],
         device=device,
         check_solution=False,
+        _batch_locked=False,
     )
     model = VRPModel(args)
+    _alias_legacy_specs()
     state = torch.load(checkpoint, map_location=device, weights_only=False)
     model.load_state_dict(state["model_state_dict"])
     model.to(device)

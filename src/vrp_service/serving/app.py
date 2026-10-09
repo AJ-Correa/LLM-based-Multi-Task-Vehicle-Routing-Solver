@@ -1,13 +1,17 @@
-"""Process checks. No model is loaded in this build, so readiness stays false."""
+"""HTTP application for LLM-based VRP decision support."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from pydantic import BaseModel
 
 from vrp_service import __version__
+from vrp_service.contracts import SolveRequest, SolveResponse
+from vrp_service.mtl.decode import load_policy
+from vrp_service.serving.settings import ServingSettings
+from vrp_service.serving.solve import CVRP_EXAMPLE, solve_mtl
 
-app = FastAPI(title="LLM-based VRP decision support", version=__version__)
+app_title = "LLM-based VRP decision support"
 
 
 class HealthResponse(BaseModel):
@@ -18,11 +22,43 @@ class ReadyResponse(BaseModel):
     ready: bool
 
 
-@app.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
-    return HealthResponse(status="ok")
+def create_app(settings: ServingSettings | None = None) -> FastAPI:
+    settings = settings if settings is not None else ServingSettings.from_env()
+    application = FastAPI(title=app_title, version=__version__)
+    application.state.settings = settings
+    application.state.policy = None
+
+    @application.get("/health", response_model=HealthResponse)
+    def health() -> HealthResponse:
+        return HealthResponse(status="ok")
+
+    @application.get("/ready", response_model=ReadyResponse)
+    def ready() -> ReadyResponse:
+        return ReadyResponse(ready=settings.weights_ready())
+
+    @application.post("/solve", response_model=SolveResponse)
+    def solve(
+        request: Annotated[
+            SolveRequest,
+            Body(openapi_examples={"cvrp": {"summary": "One customer", "value": CVRP_EXAMPLE}}),
+        ],
+    ) -> SolveResponse:
+        return solve_mtl(request, _policy(application, settings), settings.model_version)
+
+    return application
 
 
-@app.get("/ready", response_model=ReadyResponse)
-def ready() -> ReadyResponse:
-    return ReadyResponse(ready=False)
+def _policy(application: FastAPI, settings: ServingSettings):
+    if application.state.policy is not None:
+        return application.state.policy
+    if not settings.weights_ready() or settings.source_root is None:
+        return None
+    application.state.policy = load_policy(
+        settings.checkpoint_path,
+        settings.source_root,
+        settings.device,
+    )
+    return application.state.policy
+
+
+app = create_app()
