@@ -1,4 +1,4 @@
-"""The 16 single-depot variants POLAR trains on.
+"""The 16 single-depot variants used for multi-task training.
 
 Each name is one on/off combination of open routes, time windows, a distance
 limit, and classical backhaul. Mixed backhaul and multi-depot names are absent.
