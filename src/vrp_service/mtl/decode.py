@@ -181,35 +181,35 @@ def _forward(instance: EnvironmentInstance, model, env, device: str) -> dict:
     return {"reward": reward, "tours": tours}
 
 
-def _static_batch(instance: EnvironmentInstance, torch, tensor_dict, device: str):
-    count = len(instance.node_ids)
-    locations = torch.tensor(instance.locs, dtype=torch.float32, device=device).view(1, count, 2)
-    windows = torch.tensor(instance.time_windows, dtype=torch.float32, device=device).view(
-        1, count, 2
-    )
+def batch_fields(instance: EnvironmentInstance) -> dict[str, list]:
+    """The static fields the environment resets from, as nested lists of batch size 1.
 
+    Kept free of torch so CI can compare them with a checked-in snapshot.
+    """
     linehaul, backhaul, capacity = scaled_loads(instance)
+    return {
+        "locs": [[list(point) for point in instance.locs]],
+        "demand_linehaul": [list(linehaul)],
+        "demand_backhaul": [list(backhaul)],
+        "backhaul_class": [[instance.backhaul_class]],
+        "distance_limit": [[instance.distance_limit]],
+        "service_time": [list(instance.service_time)],
+        "open_route": [[instance.open_route]],
+        "time_windows": [[list(window) for window in instance.time_windows]],
+        "vehicle_capacity": [[capacity]],
+        "capacity_original": [[instance.capacity_original]],
+        "speed": [[instance.speed]],
+    }
 
-    def column(values: Sequence[float]):
-        return torch.tensor(values, dtype=torch.float32, device=device).view(1, count)
 
-    def scalar(value: float):
-        return torch.tensor([[value]], dtype=torch.float32, device=device)
+def _static_batch(instance: EnvironmentInstance, torch, tensor_dict, device: str):
+    def tensor(name: str, values: list):
+        dtype = torch.bool if name == "open_route" else torch.float32
+        return torch.tensor(values, dtype=dtype, device=device)
 
+    fields = batch_fields(instance)
     return tensor_dict(
-        {
-            "locs": locations,
-            "demand_linehaul": column(linehaul),
-            "demand_backhaul": column(backhaul),
-            "backhaul_class": scalar(instance.backhaul_class),
-            "distance_limit": scalar(instance.distance_limit),
-            "service_time": column(instance.service_time),
-            "open_route": torch.tensor([[instance.open_route]], dtype=torch.bool, device=device),
-            "time_windows": windows,
-            "vehicle_capacity": scalar(capacity),
-            "capacity_original": scalar(instance.capacity_original),
-            "speed": scalar(instance.speed),
-        },
+        {name: tensor(name, values) for name, values in fields.items()},
         batch_size=[1],
         device=device,
     )

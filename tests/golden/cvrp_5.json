@@ -1,0 +1,54 @@
+{
+  "contract_version": "1.0.0",
+  "backend": "mtl",
+  "variant": "cvrp",
+  "seed": 0,
+  "instance": {
+    "nodes": [
+      {
+        "id": 0,
+        "x": 0.399,
+        "y": 0.5167,
+        "demand_linehaul": 0,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 1,
+        "x": 0.4963,
+        "y": 0.7682,
+        "demand_linehaul": 9,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 2,
+        "x": 0.0885,
+        "y": 0.132,
+        "demand_linehaul": 7,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 3,
+        "x": 0.3074,
+        "y": 0.6341,
+        "demand_linehaul": 5,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 4,
+        "x": 0.4901,
+        "y": 0.8964,
+        "demand_linehaul": 3,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 5,
+        "x": 0.4556,
+        "y": 0.6323,
+        "demand_linehaul": 4,
+        "demand_backhaul": 0
+      }
+    ],
+    "capacity": 30,
+    "open_route": false
+  }
+}
