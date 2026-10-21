@@ -1,0 +1,89 @@
+{
+  "contract_version": "1.0.0",
+  "backend": "mtl",
+  "variant": "ovrpbltw",
+  "seed": 1,
+  "instance": {
+    "nodes": [
+      {
+        "id": 0,
+        "x": 0.8903,
+        "y": 0.0275,
+        "demand_linehaul": 0,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 1,
+        "x": 0.7576,
+        "y": 0.2793,
+        "demand_linehaul": 7,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 2,
+        "x": 0.4031,
+        "y": 0.7347,
+        "demand_linehaul": 3,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 3,
+        "x": 0.0293,
+        "y": 0.7999,
+        "demand_linehaul": 7,
+        "demand_backhaul": 0
+      },
+      {
+        "id": 4,
+        "x": 0.3971,
+        "y": 0.7544,
+        "demand_linehaul": 0,
+        "demand_backhaul": 9
+      },
+      {
+        "id": 5,
+        "x": 0.5695,
+        "y": 0.4388,
+        "demand_linehaul": 9,
+        "demand_backhaul": 0
+      }
+    ],
+    "capacity": 30,
+    "open_route": true,
+    "time_windows": [
+      {
+        "start": 0.0,
+        "end": 4.6
+      },
+      {
+        "start": 1.9282,
+        "end": 2.1114
+      },
+      {
+        "start": 2.6164,
+        "end": 2.7991
+      },
+      {
+        "start": 2.2141,
+        "end": 2.4002
+      },
+      {
+        "start": 3.1821,
+        "end": 3.3794
+      },
+      {
+        "start": 1.5994,
+        "end": 1.7845
+      }
+    ],
+    "service_times": [
+      0.0,
+      0.1574,
+      0.153,
+      0.1753,
+      0.1578,
+      0.1781
+    ],
+    "distance_limit": 2.5473
+  }
+}

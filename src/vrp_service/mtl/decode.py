@@ -1,0 +1,215 @@
+"""Decode one instance with the multi-task policy.
+
+The network and environment stay outside this package. ``load_policy`` reads a
+checkpoint and calls that code. ``decode_request`` only maps the returned tours
+back to node ids and keeps the best finite cost. Reward from the environment is
+a negative length, so cost is its negation.
+"""
+
+import math
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+
+from vrp_service.contracts import SolveRequest
+from vrp_service.env.instance import EnvironmentInstance, load_instance
+
+Policy = Callable[[EnvironmentInstance], dict]
+
+
+@dataclass(frozen=True)
+class DecodedSolution:
+    node_ids: tuple[int, ...]
+    cost: float
+
+
+def select_route(
+    node_ids: Sequence[int],
+    tours: Sequence[Sequence[int]],
+    rewards: Sequence[float],
+) -> DecodedSolution:
+    if len(tours) == 0 or len(tours) != len(rewards):
+        raise ValueError("each tour needs one reward")
+    costs = [_cost(reward) for reward in rewards]
+    best = min(range(len(costs)), key=lambda index: costs[index])
+    route = tuple(node_ids[int(step)] for step in tours[best])
+    if len(route) == 0:
+        raise ValueError("best tour is empty")
+    return DecodedSolution(node_ids=route, cost=costs[best])
+
+
+def decode_request(request: SolveRequest, policy: Policy) -> DecodedSolution:
+    instance = load_instance(request)
+    result = policy(instance)
+    return select_route(instance.node_ids, result["tours"], result["reward"])
+
+
+def load_policy(
+    checkpoint_path: str,
+    source_root: str,
+    device: str = "cpu",
+    cpu_threads: int = 4,
+) -> Policy:
+    """Load the network and environment once and return a policy that reuses them.
+
+    Each call to the returned policy runs one forward pass, so per-request latency
+    measures the solve and not the checkpoint load. On CPU the thread count is
+    capped: the matrices are small, and spreading them over every core is slower.
+    """
+    checkpoint = Path(checkpoint_path)
+    root = Path(source_root)
+    if not checkpoint.is_file():
+        raise FileNotFoundError(checkpoint)
+    if not (root / "config.yaml").is_file():
+        raise FileNotFoundError(root / "config.yaml")
+
+    model, env = _load(checkpoint, root, device, cpu_threads)
+
+    def policy(instance: EnvironmentInstance) -> dict:
+        return _forward(instance, model, env, device)
+
+    return policy
+
+
+def _alias_legacy_specs() -> None:
+    """Older checkpoints name spec classes that later releases renamed."""
+    import torchrl.data.tensor_specs as specs
+
+    renamed = {
+        "CompositeSpec": "Composite",
+        "BoundedTensorSpec": "Bounded",
+        "UnboundedContinuousTensorSpec": "Unbounded",
+        "UnboundedDiscreteTensorSpec": "UnboundedDiscrete",
+    }
+    for old, new in renamed.items():
+        if not hasattr(specs, old) and hasattr(specs, new):
+            setattr(specs, old, getattr(specs, new))
+
+
+def _cost(reward: float) -> float:
+    cost = -float(reward)
+    if not math.isfinite(cost) or cost < 0:
+        raise ValueError("cost must be finite and non-negative")
+    return cost
+
+
+def prompt_tag(instance: EnvironmentInstance) -> tuple[float, ...]:
+    """Closed, open, windows, limit, backhaul, two zeros, then customers / 2000.
+
+    Reset drops this field, so the caller writes it back onto the batch afterwards.
+    """
+    customers = len(instance.node_ids) - 1
+    has_windows = any(math.isfinite(end) for _start, end in instance.time_windows)
+    has_limit = math.isfinite(instance.distance_limit)
+    has_backhaul = any(demand > 0 for demand in instance.demand_backhaul)
+    return (
+        float(not instance.open_route),
+        float(instance.open_route),
+        float(has_windows),
+        float(has_limit),
+        float(has_backhaul),
+        0.0,
+        0.0,
+        customers / 2000.0,
+    )
+
+
+def scaled_loads(
+    instance: EnvironmentInstance,
+) -> tuple[tuple[float, ...], tuple[float, ...], float]:
+    """Demands divided by capacity, with vehicle capacity set to 1."""
+    capacity = instance.vehicle_capacity
+    linehaul = tuple(value / capacity for value in instance.demand_linehaul)
+    backhaul = tuple(value / capacity for value in instance.demand_backhaul)
+    return linehaul, backhaul, 1.0
+
+
+def decode_model_params(raw: dict) -> dict:
+    params = dict(raw)
+    params["sqrt_embedding_dim"] = float(params["embedding_dim"]) ** 0.5
+    return params
+
+
+def _load(checkpoint: Path, root: Path, device: str, cpu_threads: int):
+    import sys
+
+    import torch
+    import yaml
+
+    if device == "cpu":
+        torch.set_num_threads(cpu_threads)
+
+    root_text = str(root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+    from envs.mtvrp import MTVRPEnv
+    from models.model import VRPModel
+
+    with (root / "config.yaml").open() as handle:
+        config = yaml.safe_load(handle)
+    args = SimpleNamespace(
+        model_params=decode_model_params(config["model_params"]),
+        trainer_params=config.get("trainer_params", {}),
+        log=lambda *_args, **_kwargs: None,
+    )
+    env = MTVRPEnv(
+        generator_params=config["env"]["generator_params"],
+        device=device,
+        check_solution=False,
+        _batch_locked=False,
+    )
+    model = VRPModel(args)
+    _alias_legacy_specs()
+    state = torch.load(checkpoint, map_location=device, weights_only=False)
+    model.load_state_dict(state["model_state_dict"])
+    model.to(device)
+    model.eval()
+    return model, env
+
+
+def _forward(instance: EnvironmentInstance, model, env, device: str) -> dict:
+    import torch
+    from tensordict import TensorDict
+
+    td = env.reset(_static_batch(instance, torch, TensorDict, device))
+    td["p_s_tag"] = torch.tensor([prompt_tag(instance)], dtype=torch.float32, device=device)
+    with torch.inference_mode():
+        output = model(td, env)
+    reward = output["reward"].detach().cpu().reshape(-1).tolist()
+    tours = output["tours"].detach().cpu().tolist()
+    return {"reward": reward, "tours": tours}
+
+
+def batch_fields(instance: EnvironmentInstance) -> dict[str, list]:
+    """The static fields the environment resets from, as nested lists of batch size 1.
+
+    Kept free of torch so CI can compare them with a checked-in snapshot.
+    """
+    linehaul, backhaul, capacity = scaled_loads(instance)
+    return {
+        "locs": [[list(point) for point in instance.locs]],
+        "demand_linehaul": [list(linehaul)],
+        "demand_backhaul": [list(backhaul)],
+        "backhaul_class": [[instance.backhaul_class]],
+        "distance_limit": [[instance.distance_limit]],
+        "service_time": [list(instance.service_time)],
+        "open_route": [[instance.open_route]],
+        "time_windows": [[list(window) for window in instance.time_windows]],
+        "vehicle_capacity": [[capacity]],
+        "capacity_original": [[instance.capacity_original]],
+        "speed": [[instance.speed]],
+    }
+
+
+def _static_batch(instance: EnvironmentInstance, torch, tensor_dict, device: str):
+    def tensor(name: str, values: list):
+        dtype = torch.bool if name == "open_route" else torch.float32
+        return torch.tensor(values, dtype=dtype, device=device)
+
+    fields = batch_fields(instance)
+    return tensor_dict(
+        {name: tensor(name, values) for name, values in fields.items()},
+        batch_size=[1],
+        device=device,
+    )

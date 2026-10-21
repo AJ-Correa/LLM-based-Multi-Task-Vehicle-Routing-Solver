@@ -8,6 +8,8 @@ services:
     image: vrp-api:local
     ports:
       - "8000:8000"
+    volumes:
+      - ../artifacts/checkpoints:/app/artifacts/checkpoints:ro
     healthcheck:
       test:
         [
