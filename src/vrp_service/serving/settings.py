@@ -17,6 +17,7 @@ class ServingSettings:
     source_root: str | None = None
     model_version: str = MODEL_VERSION
     device: str = "cpu"
+    cpu_threads: int = 4
 
     @classmethod
     def from_env(cls) -> "ServingSettings":
@@ -28,6 +29,7 @@ class ServingSettings:
             source_root=os.environ.get("MTL_SOURCE") or str(source),
             model_version=os.environ.get("MTL_MODEL_VERSION") or MODEL_VERSION,
             device=os.environ.get("MTL_DEVICE") or "cpu",
+            cpu_threads=int(os.environ.get("MTL_CPU_THREADS") or 4),
         )
 
     def weights_ready(self) -> bool:

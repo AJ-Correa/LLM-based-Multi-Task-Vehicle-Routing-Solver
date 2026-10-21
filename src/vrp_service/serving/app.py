@@ -1,5 +1,10 @@
-"""HTTP application for LLM-based VRP decision support."""
+"""HTTP application for LLM-based VRP decision support.
 
+When the checkpoint is present, startup loads the policy once so no request pays
+for the load.
+"""
+
+from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Body, FastAPI
@@ -24,7 +29,13 @@ class ReadyResponse(BaseModel):
 
 def create_app(settings: ServingSettings | None = None) -> FastAPI:
     settings = settings if settings is not None else ServingSettings.from_env()
-    application = FastAPI(title=app_title, version=__version__)
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        _policy(application, settings)
+        yield
+
+    application = FastAPI(title=app_title, version=__version__, lifespan=lifespan)
     application.state.settings = settings
     application.state.policy = None
 
@@ -57,6 +68,7 @@ def _policy(application: FastAPI, settings: ServingSettings):
         settings.checkpoint_path,
         settings.source_root,
         settings.device,
+        settings.cpu_threads,
     )
     return application.state.policy
 

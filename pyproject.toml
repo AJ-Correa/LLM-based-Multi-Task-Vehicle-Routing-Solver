@@ -24,9 +24,24 @@ mtl = [
     "numpy>=1.26",
     "pyyaml>=6",
     "tensordict>=0.6",
-    "torch>=2.6",
     "torchrl>=0.6",
 ]
+
+# Pick one torch build: `cpu` for the API image, `gpu` (the PyPI CUDA wheel) for local runs.
+[project.optional-dependencies]
+cpu = ["torch>=2.6"]
+gpu = ["torch>=2.6"]
+
+[tool.uv]
+conflicts = [[{ extra = "cpu" }, { extra = "gpu" }]]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", extra = "cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

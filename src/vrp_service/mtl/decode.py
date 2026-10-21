@@ -45,8 +45,18 @@ def decode_request(request: SolveRequest, policy: Policy) -> DecodedSolution:
     return select_route(instance.node_ids, result["tours"], result["reward"])
 
 
-def load_policy(checkpoint_path: str, source_root: str, device: str = "cpu") -> Policy:
-    """Return a policy that runs one forward pass from a saved checkpoint."""
+def load_policy(
+    checkpoint_path: str,
+    source_root: str,
+    device: str = "cpu",
+    cpu_threads: int = 4,
+) -> Policy:
+    """Load the network and environment once and return a policy that reuses them.
+
+    Each call to the returned policy runs one forward pass, so per-request latency
+    measures the solve and not the checkpoint load. On CPU the thread count is
+    capped: the matrices are small, and spreading them over every core is slower.
+    """
     checkpoint = Path(checkpoint_path)
     root = Path(source_root)
     if not checkpoint.is_file():
@@ -54,8 +64,10 @@ def load_policy(checkpoint_path: str, source_root: str, device: str = "cpu") -> 
     if not (root / "config.yaml").is_file():
         raise FileNotFoundError(root / "config.yaml")
 
+    model, env = _load(checkpoint, root, device, cpu_threads)
+
     def policy(instance: EnvironmentInstance) -> dict:
-        return _forward(instance, checkpoint, root, device)
+        return _forward(instance, model, env, device)
 
     return policy
 
@@ -119,17 +131,14 @@ def decode_model_params(raw: dict) -> dict:
     return params
 
 
-def _forward(
-    instance: EnvironmentInstance,
-    checkpoint: Path,
-    root: Path,
-    device: str,
-) -> dict:
+def _load(checkpoint: Path, root: Path, device: str, cpu_threads: int):
     import sys
 
     import torch
     import yaml
-    from tensordict import TensorDict
+
+    if device == "cpu":
+        torch.set_num_threads(cpu_threads)
 
     root_text = str(root)
     if root_text not in sys.path:
@@ -156,6 +165,12 @@ def _forward(
     model.load_state_dict(state["model_state_dict"])
     model.to(device)
     model.eval()
+    return model, env
+
+
+def _forward(instance: EnvironmentInstance, model, env, device: str) -> dict:
+    import torch
+    from tensordict import TensorDict
 
     td = env.reset(_static_batch(instance, torch, TensorDict, device))
     td["p_s_tag"] = torch.tensor([prompt_tag(instance)], dtype=torch.float32, device=device)

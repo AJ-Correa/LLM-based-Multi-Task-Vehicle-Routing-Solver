@@ -8,16 +8,18 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_NO_DEV=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    MTL_SOURCE=/app/runtime \
+    MTL_CHECKPOINT=/app/artifacts/checkpoints/n100/checkpoint-300.pt
 
 RUN useradd --create-home --uid 1000 appuser
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --group mtl --extra cpu --no-install-project
 
+COPY runtime ./runtime
 COPY src ./src
-RUN uv sync --frozen --no-dev --no-editable \
-    && chown -R appuser:appuser /app
+RUN uv sync --frozen --no-dev --group mtl --extra cpu --no-editable
 
 USER appuser
 

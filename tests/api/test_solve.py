@@ -74,6 +74,24 @@ def test_ready_is_true_when_the_checkpoint_file_exists(tmp_path) -> None:
     assert TestClient(application).get("/ready").json() == {"ready": True}
 
 
+def test_startup_loads_the_policy_once(tmp_path, monkeypatch) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"")
+    loads = []
+
+    def fake_load(checkpoint_path, source_root, device, cpu_threads):
+        loads.append(checkpoint_path)
+        return lambda _instance: {"reward": [-2.5], "tours": [[0, 1, 0]]}
+
+    monkeypatch.setattr("vrp_service.serving.app.load_policy", fake_load)
+    settings = ServingSettings(checkpoint_path=str(checkpoint), source_root=str(tmp_path))
+    with TestClient(create_app(settings)) as client:
+        assert len(loads) == 1
+        for _ in range(2):
+            assert client.post("/solve", json=CVRP_EXAMPLE).json()["status"] == "ok"
+    assert len(loads) == 1
+
+
 def test_openapi_includes_a_cvrp_example() -> None:
     spec = TestClient(create_app(ServingSettings())).get("/openapi.json").json()
     example = spec["paths"]["/solve"]["post"]["requestBody"]["content"]["application/json"]
