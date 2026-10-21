@@ -22,6 +22,16 @@ def test_routes_start_at_the_depot_when_the_tour_does_not() -> None:
     assert [route.node_ids for route in routes] == [[0, 1, 0]]
 
 
+def test_a_closed_route_returns_to_the_depot_after_its_last_customer() -> None:
+    routes = routes_from_tour((3, 4, 0, 2))
+    assert [route.node_ids for route in routes] == [[0, 3, 4, 0], [0, 2, 0]]
+
+
+def test_open_routes_end_at_their_last_customer_and_drop_padding() -> None:
+    routes = routes_from_tour((5, 2, 0, 3, 0, 1, 0, 0), open_route=True)
+    assert [route.node_ids for route in routes] == [[0, 5, 2], [0, 3], [0, 1]]
+
+
 def test_solve_returns_routes_cost_and_model_version() -> None:
     def policy(instance):
         assert instance.node_ids == (0, 1)

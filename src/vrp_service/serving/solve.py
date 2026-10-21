@@ -31,20 +31,22 @@ CVRP_EXAMPLE = {
 }
 
 
-def routes_from_tour(node_ids: Sequence[int]) -> list[Route]:
-    """Split a tour on each return to the depot. A trailing open leg stays one route."""
+def routes_from_tour(node_ids: Sequence[int], open_route: bool = False) -> list[Route]:
+    """Split a tour into one route per vehicle.
+
+    A depot visit separates vehicles, and trailing zeros are padding. A closed
+    route returns to the depot after its last customer; an open route ends there.
+    """
     routes: list[Route] = []
-    current: list[int] = []
-    nodes = [int(node) for node in node_ids]
-    if nodes and nodes[0] != 0:
-        nodes = [0, *nodes]
-    for node in nodes:
-        current.append(int(node))
-        if node == 0 and len(current) > 1:
-            routes.append(Route(vehicle_id=len(routes), node_ids=list(current)))
-            current = [0]
-    if current not in ([], [0]):
-        routes.append(Route(vehicle_id=len(routes), node_ids=list(current)))
+    segment: list[int] = []
+    for node in [*(int(node) for node in node_ids), 0]:
+        if node != 0:
+            segment.append(node)
+            continue
+        if segment:
+            ending = [] if open_route else [0]
+            routes.append(Route(vehicle_id=len(routes), node_ids=[0, *segment, *ending]))
+            segment = []
     return routes
 
 
@@ -67,7 +69,7 @@ def solve_mtl(
         model_version=model_version,
         feasible=True,
         objective_value=decoded.cost,
-        routes=routes_from_tour(decoded.node_ids),
+        routes=routes_from_tour(decoded.node_ids, request.instance.open_route),
         latency_ms=_latency(started),
         status="ok",
     )
