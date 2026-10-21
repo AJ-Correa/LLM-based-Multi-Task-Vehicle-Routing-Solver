@@ -1,0 +1,23 @@
+{
+  "name": "mtl",
+  "version": "0.1.0",
+  "backend": "mtl",
+  "created_at": "2026-10-21",
+  "description": "Multi-task routing policy for the 16 single-depot variants, trained at 100 customers for 300 epochs.",
+  "files": [
+    {
+      "role": "checkpoint",
+      "path": "artifacts/checkpoints/n100/checkpoint-300.pt",
+      "bytes": 84255859,
+      "sha256": "f77a8e334e84d2ad1e2ea8ce9ca46778d61db5339175c56a08dddf63ca890749",
+      "in_git": false
+    },
+    {
+      "role": "config",
+      "path": "runtime/config.yaml",
+      "sha256": "64d2e29ca440775818fd55516668a0fb85878a499de89afa2630f123358e2930",
+      "in_git": true
+    }
+  ],
+  "metrics_ref": null
+}
