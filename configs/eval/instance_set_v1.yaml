@@ -1,0 +1,79 @@
+# Frozen eval set
+# PyVRP and OR-Tools solved every instance with a 20-second limit. See data/eval/n100/README.md.
+name: instance_set_v1
+root: data/eval/n100
+customers: 100
+instances_per_variant: 100
+instance_file: 100.npz
+solution_files:
+  pyvrp: 100_sol_pyvrp.npz
+  ortools: 100_sol_ortools.npz
+# CI runs the harness on these two only.
+smoke:
+  - {variant: cvrp, index: 0}
+  - {variant: ovrpbltw, index: 0}
+sha256:
+  cvrp:
+    100.npz: 38926dbd67eaa5db66f05a2bea5abd859893e2a5b90adcacd6b3e224106056b0
+    100_sol_pyvrp.npz: 1cb5d7ebdec2d1011bf8e21f6310868c467ac9d654fa31e461ff1fd70cd2603e
+    100_sol_ortools.npz: c16f28c62b58c4275c359dd594bbaa62127f627d00a6ce7d59b9a2546788b121
+  ovrp:
+    100.npz: b0235c67fc64ddb56f9a669da593e56f9752d160b3c1f3f0dea0c1443f1752f3
+    100_sol_pyvrp.npz: 506ec269e8b09bc3c86a633ba20d80c042703b2fd1a069d77fe5dd61879a9ba9
+    100_sol_ortools.npz: 1e673cf1065d3d6954c7a4fa3662bcf13117c776ef4660920e2380eecea73b31
+  vrpb:
+    100.npz: 596813022ccead64333d7d04ef63c9c9857684ff9acc0fd8a2a30957aaf8a3a4
+    100_sol_pyvrp.npz: e08a0142db0214fa9c03f23b11fc8b27375f37750061db5b5b3d1d359c2de7c9
+    100_sol_ortools.npz: 9dc9151534b3517350bd008392700ef28f515c6a2aac40cdb53b8bf44f8472d0
+  vrpl:
+    100.npz: 189fa6c4d4ca1c831cf484892f7f6bde5cb97ee0086a4bc17a0d29447c22cf57
+    100_sol_pyvrp.npz: 842b8c58684b2c01659a943b31d97edb1e8913ac1dede2f1bcd95842ecb49780
+    100_sol_ortools.npz: f15371e9c86685ffa2bfff29f811a30ac71b9ed45dbee23c8e510a015131c1e5
+  vrptw:
+    100.npz: 1c2c5755057a5f0e84d6603aec5fe0ad8ab387a416b0a215ade14439c554da3c
+    100_sol_pyvrp.npz: c7001ccbdd4d49b309d2cf4889ea7721c77fea9e25bc447810832053d7513929
+    100_sol_ortools.npz: 244a68e3c27c8dcb242cd34c32bc195fb3a1f6ae56fe09bfd131716ef74f9311
+  ovrptw:
+    100.npz: a68f2de9ebaf805830f60e6a1475efa3567516084569221bdc28e9deae9b021f
+    100_sol_pyvrp.npz: 4b6b93e2b4a00dae20b13d74a564f96ed381ffd3b932b487308df346bc2847ab
+    100_sol_ortools.npz: 6d88cfb0dcb85f65fc7c519f467c55991369a09f4de88f36209d13242cf92e71
+  ovrpb:
+    100.npz: 6e870cf74c96c603a52c20ceb311bc552d463c3268eda20be6bcdc3a69cb734c
+    100_sol_pyvrp.npz: 3bf01ee50c8d26f31e0acad5c9ad14bf69f0e908754aca0faa236c24e6201f73
+    100_sol_ortools.npz: 47e94a7cd4ccb5febeafca36754bb1c6338def6e38217260bfaffec9cf48a184
+  ovrpl:
+    100.npz: f7cca1435f31159a7b48fa90b0165c5f23a1a93eed2af4b1a03c1498bbc9231f
+    100_sol_pyvrp.npz: f49ed04341666dc16cde8f1c7738d208e4b340d0b139cdf8c36d44a048826c03
+    100_sol_ortools.npz: 7f81d5af86aa95d7d6b88ffd5bdddc94c1996656239dc97debe764371c70c725
+  vrpbl:
+    100.npz: b0c2baf28aac1bda8d545439ea036cd5f28ef9f3a5350ed986fdbf29ac6b3684
+    100_sol_pyvrp.npz: 24f15ccb84213c1ce035216d325867bb842298fd53a3568cf3795f1548ef62db
+    100_sol_ortools.npz: ecd5cd50940b507e4a5c0b3f86bf5083670ae39310a2efbd40b8a6ae8c1dc737
+  vrpbtw:
+    100.npz: 25af83fa771fba9cba94cb34b99559eed7849f3363ebc01bb4650b8fe0b3d255
+    100_sol_pyvrp.npz: 06d9d0f6721fbee57c7ecbc9ee22c065ed949128a2b6624b73b92d80d3dd1ddd
+    100_sol_ortools.npz: 05de9a2857f68274d1a2ee195f7f063b197c34399c03cd489513f16e76710aea
+  vrpltw:
+    100.npz: 5f7229c2f94c9e1e23c1a30ea6b754e3d0a6c72079a953e348cd4342cf6081ac
+    100_sol_pyvrp.npz: 68f5861bf422e1ad470b3e3768967b5942205247bda0005960b6e766f00ae21d
+    100_sol_ortools.npz: 8ebf58b816594bc07d184c37dea1423ef9cdec5d5ae0aa7b398298aef94d071c
+  ovrpbl:
+    100.npz: 38fd8a50e90f5866e812fb9131721580d65cfa6fe2fe36d63e74b5740d08654c
+    100_sol_pyvrp.npz: 3a12722e677a7ae7f521f0c48c29d8f95b545f69fd25ff19a722a8e2beba3606
+    100_sol_ortools.npz: d3735fab897f576ca1b80f286194bcd9df1a799b7e49710e9b3a85f1461910ad
+  ovrpbtw:
+    100.npz: 3b3c4c5acaac33e95e40f3e06b9e07223fccf8c3a24976a6b1c4dfa8295fe421
+    100_sol_pyvrp.npz: ef821c8c0020032a44088aaf578ae348ec48ebd657752e9487f2f9277e15ba2a
+    100_sol_ortools.npz: 42feab936fe856dcdc7ae2fd9a3ba047b26cbce541c04d83957b4ad5411389f2
+  ovrpltw:
+    100.npz: 484191c2d704660cd7f238d542fbfcc6c7f4efed3e311d41df4536a53dd46897
+    100_sol_pyvrp.npz: 494ee3daac32abd439df37f6cd44e056c581ee478ef1dcbea8efb42948a9e77d
+    100_sol_ortools.npz: 4aa5918acf257ca014af0b9b05b3f1502f5cccd6e4ecec403e70fc3a1a909d97
+  vrpbltw:
+    100.npz: e12df53cbf6cb06291dc87babb5c55cc66bd4d1d4e7c3176424427714163c617
+    100_sol_pyvrp.npz: a76abbcdd4d9937f80f6f1a60c128a78064031ca8bfd96789293e19747b21997
+    100_sol_ortools.npz: 406c318f4adb7e1ad90c9a93300f97798eb04e98c3691a5956f99348afef6a37
+  ovrpbltw:
+    100.npz: ac8504ced3367a5257fc87295c401637eebc8ab1153e07fdf49e0df9ffafbe59
+    100_sol_pyvrp.npz: 6209d9c4c658f4bd19cdb4389c0f30235cdacbfb55287f16cbc48cc9b8b7b0b6
+    100_sol_ortools.npz: 8c1d7bc5b028106a882ca8a557f0b67c178c56e1e8b5badd7bcab8076c0e8e6a
