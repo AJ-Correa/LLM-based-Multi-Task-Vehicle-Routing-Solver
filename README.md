@@ -84,7 +84,10 @@ per node) for TW, `distance_limit` for L, and `open_route` must match O. A reque
 do not match its variant is rejected with `422`. `tests/golden/ovrpbltw_5.json` is a request
 with every feature on. The OpenAPI page at `/docs` has the schema and an example.
 
-Closed routes end at the depot. Open routes end at their last customer.
+Closed routes end at the depot. Open routes end at their last customer. `feasible` comes from a
+separate checker (`vrp_service.env.check_routes`) that tests every route for capacity, visiting
+each customer once, the depot start and end, time windows, the distance limit, and linehaul
+before backhaul.
 
 ## Endpoints
 
@@ -105,6 +108,13 @@ Closed routes end at the depot. Open routes end at their last customer.
 | `MTL_CPU_THREADS`   | `4`                                           |
 
 The policy loads once at startup.
+
+## Eval set
+
+`data/eval/n100/` holds 100 instances for each of the 16 variants, 100 customers each, with
+reference PyVRP and OR-Tools solutions (20 seconds per instance).
+`configs/eval/instance_set_v1.yaml` lists every file with its SHA-256, and a test checks them.
+`data/eval/n100/README.md` describes the arrays.
 
 ## Model registry
 
@@ -127,6 +137,4 @@ uv run --group mtl --extra gpu pytest -q
 
 ## Known limits
 
-- `feasible` is reported as `true` for every successful solve. The policy masks infeasible moves,
-  but no separate checker verifies the routes yet.
 - `seed` and `options.timeout_ms` are accepted but not used yet.
