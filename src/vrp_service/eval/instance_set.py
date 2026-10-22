@@ -16,6 +16,7 @@ from vrp_service.contracts import TRAINING_VARIANTS, SolveRequest
 
 @dataclass(frozen=True)
 class InstanceSet:
+    name: str
     root: Path
     instance_file: str
     solution_files: dict[str, str]
@@ -37,6 +38,7 @@ def load_instance_set(config_path: str | Path, project_root: str | Path) -> Inst
     """``root`` in the YAML is relative to the project root."""
     config = yaml.safe_load(Path(config_path).read_text())
     return InstanceSet(
+        name=config["name"],
         root=Path(project_root) / config["root"],
         instance_file=config["instance_file"],
         solution_files=dict(config["solution_files"]),
