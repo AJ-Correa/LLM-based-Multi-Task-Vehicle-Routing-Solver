@@ -1,7 +1,11 @@
+import io
+import json
+import sys
+
 from fastapi.testclient import TestClient
 
 from vrp_service.contracts import SolveRequest
-from vrp_service.serving.app import create_app
+from vrp_service.serving.app import STDOUT_HANDLER, create_app, solve_log
 from vrp_service.serving.settings import ServingSettings
 from vrp_service.serving.solve import CVRP_EXAMPLE, routes_from_tour, solve_mtl
 
@@ -106,3 +110,27 @@ def test_openapi_includes_a_cvrp_example() -> None:
     spec = TestClient(create_app(ServingSettings())).get("/openapi.json").json()
     example = spec["paths"]["/solve"]["post"]["requestBody"]["content"]["application/json"]
     assert example["examples"]["cvrp"]["value"]["variant"] == "cvrp"
+
+
+def test_each_solve_writes_one_json_line_to_stdout() -> None:
+    application = create_app(ServingSettings())
+    application.state.policy = lambda _instance: {"reward": [-2.5], "tours": [[0, 1, 0]]}
+    [handler] = [h for h in solve_log.handlers if h.get_name() == STDOUT_HANDLER]
+    assert handler.stream is sys.stdout or handler.stream.name == "<stdout>"
+    captured = io.StringIO()
+    previous = handler.setStream(captured)
+    try:
+        TestClient(application).post("/solve", json=CVRP_EXAMPLE)
+    finally:
+        handler.setStream(previous)
+    lines = captured.getvalue().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["variant"] == "cvrp"
+    assert record["customers"] == 1
+    assert record["status"] == "ok"
+    assert record["error_type"] is None
+    assert record["feasible"] is True
+    assert record["objective_value"] == 2.5
+    assert record["vehicles"] == 1
+    assert record["latency_ms"] >= 0

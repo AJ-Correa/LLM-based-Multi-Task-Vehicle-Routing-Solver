@@ -1,14 +1,15 @@
 """Turn one solve request into the shared response.
 
-``backend=mtl`` decodes with the supplied policy. Any other backend, or a
-missing policy, stays on the same response schema with ``feasible`` false.
+``backend=mtl`` decodes with the supplied policy, and ``feasible`` comes from the
+route checker. Any other backend, or a missing policy, stays on the same
+response schema with ``feasible`` false.
 """
 
 import time
 from collections.abc import Callable, Sequence
 
 from vrp_service.contracts import Route, SolveRequest, SolveResponse
-from vrp_service.env.instance import EnvironmentInstance
+from vrp_service.env import EnvironmentInstance, check_routes, load_instance
 from vrp_service.mtl.decode import decode_request
 from vrp_service.serving.settings import MODEL_VERSION
 
@@ -64,12 +65,14 @@ def solve_mtl(
         decoded = decode_request(request, policy)
     except (ValueError, FileNotFoundError, RuntimeError):
         return _error(request, model_version, "decode_failed", started)
+    routes = routes_from_tour(decoded.node_ids, request.instance.open_route)
+    violations = check_routes(load_instance(request), [route.node_ids for route in routes])
     return SolveResponse(
         backend=request.backend,
         model_version=model_version,
-        feasible=True,
+        feasible=not violations,
         objective_value=decoded.cost,
-        routes=routes_from_tour(decoded.node_ids, request.instance.open_route),
+        routes=routes,
         latency_ms=_latency(started),
         status="ok",
     )
