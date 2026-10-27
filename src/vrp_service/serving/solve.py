@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from vrp_service.contracts import Route, SolveRequest, SolveResponse
 from vrp_service.env import EnvironmentInstance, check_routes, load_instance
 from vrp_service.mtl.decode import decode_request
+from vrp_service.observability.tracing import tracer
 from vrp_service.serving.settings import MODEL_VERSION
 
 Policy = Callable[[EnvironmentInstance], dict]
@@ -56,17 +57,40 @@ def solve_mtl(
     policy: Policy | None,
     model_version: str = MODEL_VERSION,
 ) -> SolveResponse:
+    attributes = {
+        "vrp.backend": request.backend,
+        "vrp.variant": request.variant,
+        "vrp.customers": len(request.instance.nodes) - 1,
+        "vrp.model_version": model_version,
+    }
+    with tracer.start_as_current_span("solve", attributes=attributes) as span:
+        response = _solve(request, policy, model_version)
+        span.set_attribute("vrp.status", response.status)
+        span.set_attribute("vrp.feasible", response.feasible)
+        span.set_attribute("vrp.vehicles", len(response.routes))
+        if response.error_type is not None:
+            span.set_attribute("vrp.error_type", response.error_type)
+        if response.objective_value is not None:
+            span.set_attribute("vrp.objective_value", response.objective_value)
+        return response
+
+
+def _solve(request: SolveRequest, policy: Policy | None, model_version: str) -> SolveResponse:
     started = time.perf_counter()
     if request.backend != "mtl":
         return _error(request, model_version, "unsupported_backend", started)
     if policy is None:
         return _error(request, model_version, "model_unavailable", started)
     try:
-        decoded = decode_request(request, policy)
+        with tracer.start_as_current_span("decode"):
+            decoded = decode_request(request, policy)
     except (ValueError, FileNotFoundError, RuntimeError):
         return _error(request, model_version, "decode_failed", started)
-    routes = routes_from_tour(decoded.node_ids, request.instance.open_route)
-    violations = check_routes(load_instance(request), [route.node_ids for route in routes])
+    with tracer.start_as_current_span("split_routes"):
+        routes = routes_from_tour(decoded.node_ids, request.instance.open_route)
+    with tracer.start_as_current_span("check_routes") as span:
+        violations = check_routes(load_instance(request), [route.node_ids for route in routes])
+        span.set_attribute("vrp.violations", sorted({v.kind for v in violations}))
     return SolveResponse(
         backend=request.backend,
         model_version=model_version,

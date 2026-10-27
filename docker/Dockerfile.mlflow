@@ -1,0 +1,13 @@
+# MLflow tracking server for the LoRA runs (F5). Postgres holds runs and metrics;
+# artifacts are stored on a volume and served through this server.
+FROM python:3.12-slim-bookworm
+
+RUN pip install --no-cache-dir mlflow==2.17.2 psycopg2-binary==2.9.10 sqlalchemy==2.0.36
+
+EXPOSE 5000
+
+CMD mlflow server \
+    --host 0.0.0.0 --port 5000 \
+    --backend-store-uri "postgresql://mlflow:${MLFLOW_DB_PASSWORD}@mlflow-db:5432/mlflow" \
+    --artifacts-destination /mlartifacts \
+    --serve-artifacts
