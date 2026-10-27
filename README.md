@@ -96,6 +96,8 @@ before backhaul.
 | GET    | `/health` | `{"status": "ok"}` once the process is up       |
 | GET    | `/ready`  | `{"ready": true}` when the checkpoint is on disk |
 | POST   | `/solve`  | Routes, cost, model version, latency            |
+| GET    | `/models` | Registered versions, the active one, file checks |
+| GET    | `/metrics`| Prometheus metrics                              |
 
 ## Configuration
 
@@ -106,6 +108,9 @@ before backhaul.
 | `MTL_MODEL_VERSION` | `mtl/v0.1.0`                                  |
 | `MTL_DEVICE`        | `cpu`                                         |
 | `MTL_CPU_THREADS`   | `4`                                           |
+| `MODEL_MANIFESTS`   | `artifacts/manifests`                         |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset (no trace export)             |
+| `OTEL_TRACES_EXPORTER` | unset; `console` prints spans              |
 
 The policy loads once at startup.
 
@@ -127,10 +132,25 @@ OR-Tools, latency) and a markdown table next to it. `--smoke` runs two instances
 the first N per variant, and `--mode http --url …` scores a running server. Current numbers are
 in [`docs/results.md`](docs/results.md): 100% feasible, +2.9% to PyVRP, about 0.55 s per solve.
 
+## Observability and tracking
+
+Each solve emits a trace, Prometheus metrics, and a JSON log line. Optional compose profiles:
+
+```bash
+# Prometheus on :9090 and Jaeger on :16686
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 docker compose -f docker/docker-compose.yml --profile obs up --build
+# MLflow on :5000 with its own Postgres
+docker compose -f docker/docker-compose.yml --profile mlflow up -d --build
+```
+
+[`docs/design.md`](docs/design.md) has a sample trace, the metric names, and how to add a model
+version.
+
 ## Model registry
 
-`artifacts/manifests/mtl/v0.1.0.json` records the checkpoint and config with their SHA-256. A test
-fails if the config, or the checkpoint when present, no longer matches.
+`artifacts/manifests/mtl/v0.1.0.json` records the checkpoint and config with their SHA-256.
+`GET /models` lists every valid manifest, marks the served version, and checks the files on
+disk. A test fails if the config, or the checkpoint when present, no longer matches.
 
 ## Tests
 
