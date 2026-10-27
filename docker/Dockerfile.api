@@ -10,7 +10,8 @@ ENV UV_COMPILE_BYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
     MTL_SOURCE=/app/runtime \
-    MTL_CHECKPOINT=/app/artifacts/checkpoints/n100/checkpoint-300.pt
+    MTL_CHECKPOINT=/app/artifacts/checkpoints/n100/checkpoint-300.pt \
+    MODEL_MANIFESTS=/app/artifacts/manifests
 
 RUN useradd --create-home --uid 1000 appuser
 
@@ -18,6 +19,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --group mtl --extra cpu --no-install-project
 
 COPY runtime ./runtime
+COPY artifacts/manifests ./artifacts/manifests
 COPY src ./src
 RUN uv sync --frozen --no-dev --group mtl --extra cpu --no-editable
 
