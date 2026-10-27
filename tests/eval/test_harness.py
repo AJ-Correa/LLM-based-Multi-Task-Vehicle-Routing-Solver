@@ -3,8 +3,9 @@ import json
 import pytest
 
 from vrp_service.contracts import TRAINING_VARIANTS
+from vrp_service.env import load_instance
 from vrp_service.eval import load_instance_set, read_solution
-from vrp_service.eval.harness import evaluate, main, markdown, select
+from vrp_service.eval.harness import evaluate, main, markdown, route_length, select
 from vrp_service.serving.settings import project_root
 from vrp_service.serving.solve import solve_mtl
 
@@ -91,7 +92,7 @@ def test_the_table_has_one_row_per_variant_and_an_overall_row() -> None:
     assert cvrp[1:4] == ["2", "50.0%", f"{rows[0]['objective_value']:.4f}"]
     assert vrptw[1:4] == ["2", "50.0%", f"{rows[2]['objective_value']:.4f}"]
     assert overall[1:3] == ["4", "50.0%"]
-    assert float(overall[5]) < 1e9, "an error row's latency must not enter p95"
+    assert float(overall[7]) < 1e9, "an error row's latency must not enter p95"
     assert overall[-1] == "1 |"
 
 
@@ -108,3 +109,41 @@ def test_the_smoke_command_writes_jsonl_and_markdown(tmp_path, monkeypatch) -> N
     table = out.with_suffix(".md").read_text()
     assert "- instance set: instance_set_v1" in table
     assert "- policy load ms: not loaded" in table
+
+
+def _replay(solver: str, scale: float = 1.0):
+    def solve(request):
+        stored = read_solution(INSTANCE_SET, request.variant, solver, request.seed)
+        response = solve_mtl(request, lambda _i: {"reward": [-1.0], "tours": [stored.actions]})
+        return response
+
+    def scaled(request):
+        response = solve(request)
+        row_cost = route_length(load_instance(request), [r.node_ids for r in response.routes])
+        return response.model_copy(update={"objective_value": row_cost * scale})
+
+    return scaled
+
+
+def test_replaying_a_reference_route_has_zero_gap_to_it() -> None:
+    items = [(variant, 3) for variant in TRAINING_VARIANTS]
+    for row in evaluate(INSTANCE_SET, items, _replay("ortools")):
+        assert row["ortools_feasible"] is True
+        assert row["gap_ortools"] == pytest.approx(0, abs=1e-12)
+        assert row["gap_pyvrp"] is not None or row["pyvrp_feasible"] is False
+
+
+def test_a_ten_percent_longer_cost_is_a_ten_percent_gap() -> None:
+    [row] = evaluate(INSTANCE_SET, [("cvrp", 0)], _replay("pyvrp", 1.1))
+    assert row["gap_pyvrp"] == pytest.approx(0.1)
+    stored = read_solution(INSTANCE_SET, "cvrp", "pyvrp", 0)
+    assert row["pyvrp_cost"] == pytest.approx(stored.cost, abs=0.01)
+
+
+def test_an_infeasible_answer_has_no_gap() -> None:
+    def drop_last_route(request):
+        response = _replay("ortools")(request)
+        return response.model_copy(update={"routes": response.routes[:-1]})
+
+    [row] = evaluate(INSTANCE_SET, [("cvrp", 0)], drop_last_route)
+    assert row["gap_pyvrp"] is None and row["gap_ortools"] is None

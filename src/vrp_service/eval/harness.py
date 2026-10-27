@@ -12,6 +12,7 @@ Warm-up solves run first and are not recorded.
 
 import argparse
 import json
+import math
 import time
 import urllib.error
 import urllib.request
@@ -19,8 +20,18 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from vrp_service.contracts import SolveRequest, SolveResponse
-from vrp_service.env import check_routes, load_instance
-from vrp_service.eval.instance_set import InstanceSet, load_instance_set, read_request
+from vrp_service.env import (
+    SOLVER_ROUNDING_TOLERANCE,
+    EnvironmentInstance,
+    check_routes,
+    load_instance,
+)
+from vrp_service.eval.instance_set import (
+    InstanceSet,
+    load_instance_set,
+    read_request,
+    read_solution,
+)
 from vrp_service.eval.metrics import percentile
 from vrp_service.serving.settings import ServingSettings, project_root
 
@@ -56,7 +67,9 @@ def evaluate(
         started = time.perf_counter()
         response = _solve_safely(solve, request)
         wall_ms = (time.perf_counter() - started) * 1000
-        yield score(variant, index, request, response, wall_ms)
+        row = score(variant, index, request, response, wall_ms)
+        row.update(gaps(instance_set, variant, index, request, row))
+        yield row
 
 
 def _solve_safely(solve: Solve, request: SolveRequest) -> SolveResponse:
@@ -101,14 +114,48 @@ def score(
     }
 
 
+def gaps(
+    instance_set: InstanceSet, variant: str, index: int, request: SolveRequest, row: dict
+) -> dict:
+    """Gap to each stored reference, ``(cost - reference) / reference``.
+
+    Reference costs are recomputed from the stored routes, because the stored PyVRP
+    costs are rounded. A gap is ``None`` unless both solutions are feasible.
+    """
+    from vrp_service.serving.solve import routes_from_tour
+
+    instance = load_instance(request)
+    result = {}
+    for solver in instance_set.solution_files:
+        stored = read_solution(instance_set, variant, solver, index)
+        routes = [r.node_ids for r in routes_from_tour(stored.actions, instance.open_route)]
+        feasible = not check_routes(instance, routes, SOLVER_ROUNDING_TOLERANCE)
+        reference = route_length(instance, routes)
+        result[f"{solver}_cost"] = reference
+        result[f"{solver}_feasible"] = feasible
+        both = feasible and row["feasible"]
+        result[f"gap_{solver}"] = (row["objective_value"] - reference) / reference if both else None
+    return result
+
+
+def route_length(instance: EnvironmentInstance, routes: list[list[int]]) -> float:
+    """Euclidean length in float64; routes already omit an open route's return leg."""
+    index = {node: position for position, node in enumerate(instance.node_ids)}
+    return sum(
+        math.dist(instance.locs[index[a]], instance.locs[index[b]])
+        for route in routes
+        for a, b in zip(route, route[1:])
+    )
+
+
 def markdown(rows: list[dict], header: dict[str, object]) -> str:
-    """Cost averages feasible rows only; latency covers rows that returned routes."""
+    """Cost and gaps average feasible rows only; latency covers rows that returned routes."""
     lines = [f"- {key}: {value}" for key, value in header.items()]
     lines += [
         "",
-        "| Variant | n | Feasible | Mean cost (feasible) | p50 ms | p95 ms | Wall p50 ms |"
-        " Wall p95 ms | Errors |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Variant | n | Feasible | Mean cost (feasible) | Gap PyVRP | Gap OR-Tools | p50 ms |"
+        " p95 ms | Wall p50 ms | Wall p95 ms | Errors |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     variants = list(dict.fromkeys(row["variant"] for row in rows))
     groups = [(variant, [row for row in rows if row["variant"] == variant]) for variant in variants]
@@ -130,10 +177,16 @@ def _table_row(name: str, rows: list[dict]) -> str:
         str(len(rows)),
         f"{feasible / len(rows):.1%}",
         f"{sum(costs) / len(costs):.4f}" if costs else "-",
+        *(_mean_gap(rows, f"gap_{solver}") for solver in ("pyvrp", "ortools")),
         *(_ms(values, q) for values in (latency, wall) for q in (50, 95)),
         str(len(rows) - len(solved)),
     ]
     return "| " + " | ".join(cells) + " |"
+
+
+def _mean_gap(rows: list[dict], key: str) -> str:
+    values = [row[key] for row in rows if row.get(key) is not None]
+    return f"{sum(values) / len(values):+.2%}" if values else "-"
 
 
 def _ms(values: list[float], q: float) -> str:
