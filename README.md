@@ -116,6 +116,17 @@ reference PyVRP and OR-Tools solutions (20 seconds per instance).
 `configs/eval/instance_set_v1.yaml` lists every file with its SHA-256, and a test checks them.
 `data/eval/n100/README.md` describes the arrays.
 
+To score the policy on it:
+
+```bash
+MTL_DEVICE=cuda uv run --group mtl --extra gpu python -m vrp_service.eval.harness --out results/mtl.jsonl
+```
+
+This writes one JSONL row per instance (routes, cost, feasibility, violations, gap to PyVRP and
+OR-Tools, latency) and a markdown table next to it. `--smoke` runs two instances, `--limit N`
+the first N per variant, and `--mode http --url …` scores a running server. Current numbers are
+in [`docs/results.md`](docs/results.md): 100% feasible, +2.9% to PyVRP, about 0.55 s per solve.
+
 ## Model registry
 
 `artifacts/manifests/mtl/v0.1.0.json` records the checkpoint and config with their SHA-256. A test
