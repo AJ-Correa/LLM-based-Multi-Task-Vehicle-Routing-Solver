@@ -10,6 +10,9 @@ services:
       - "8000:8000"
     volumes:
       - ../artifacts/checkpoints:/app/artifacts/checkpoints:ro
+    environment:
+      # Empty unless set, so the API runs without a collector; the obs profile sets it.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     healthcheck:
       test:
         [
@@ -22,3 +25,56 @@ services:
       timeout: 3s
       retries: 12
       start_period: 10s
+
+  # docker compose -f docker/docker-compose.yml --profile obs up
+  # with OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 to send traces.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: ["obs"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    profiles: ["obs"]
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
+  # docker compose -f docker/docker-compose.yml --profile mlflow up -d
+  # Tracking UI and API on http://localhost:5000 (MLFLOW_TRACKING_URI for the training runs).
+  mlflow-db:
+    image: postgres:16.4
+    profiles: ["mlflow"]
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: ${MLFLOW_DB_PASSWORD:-mlflow}
+      POSTGRES_DB: mlflow
+    volumes:
+      - mlflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "mlflow"]
+      interval: 5s
+      retries: 12
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    image: vrp-mlflow:local
+    profiles: ["mlflow"]
+    environment:
+      MLFLOW_DB_PASSWORD: ${MLFLOW_DB_PASSWORD:-mlflow}
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+    depends_on:
+      mlflow-db:
+        condition: service_healthy
+
+volumes:
+  mlflow-db:
+  mlflow-artifacts:
