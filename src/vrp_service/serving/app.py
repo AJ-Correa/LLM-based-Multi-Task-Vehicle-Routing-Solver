@@ -8,14 +8,19 @@ import json
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
 
 from vrp_service import __version__
 from vrp_service.contracts import SolveRequest, SolveResponse
 from vrp_service.mtl.decode import load_policy
+from vrp_service.observability.metrics import MODEL_INFO, POLICY_LOADED, record_solve
+from vrp_service.observability.tracing import configure_tracing
+from vrp_service.registry import ModelEntry, Registry, load_registry
 from vrp_service.serving.settings import ServingSettings
 from vrp_service.serving.solve import CVRP_EXAMPLE, solve_mtl
 
@@ -32,9 +37,17 @@ class ReadyResponse(BaseModel):
     ready: bool
 
 
+class ModelsResponse(BaseModel):
+    active: str
+    active_registered: bool
+    models: list[ModelEntry]
+    errors: list[str]
+
+
 def create_app(settings: ServingSettings | None = None) -> FastAPI:
     settings = settings if settings is not None else ServingSettings.from_env()
     _log_to_stdout()
+    configure_tracing()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -44,6 +57,9 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
     application = FastAPI(title=app_title, version=__version__, lifespan=lifespan)
     application.state.settings = settings
     application.state.policy = None
+    application.state.registry = None
+    MODEL_INFO.clear()
+    MODEL_INFO.labels(settings.model_version).set(1)
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -62,7 +78,27 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
     ) -> SolveResponse:
         response = solve_mtl(request, _policy(application, settings), settings.model_version)
         _log_solve(request, response)
+        record_solve(request, response)
         return response
+
+    @application.get("/models", response_model=ModelsResponse)
+    def models() -> ModelsResponse:
+        """Registered versions, the one this process serves, and any broken manifest."""
+        if application.state.registry is None:
+            application.state.registry = _registry(settings)
+        registry = application.state.registry
+        active = settings.model_version
+        return ModelsResponse(
+            active=active,
+            active_registered=any(entry.model_version == active for entry in registry.models),
+            models=registry.models,
+            errors=registry.errors,
+        )
+
+    @application.get("/metrics", include_in_schema=False)
+    def metrics() -> Response:
+        POLICY_LOADED.set(application.state.policy is not None)
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return application
 
@@ -93,6 +129,14 @@ def _log_solve(request: SolveRequest, response: SolveResponse) -> None:
         "latency_ms": round(response.latency_ms, 3),
     }
     solve_log.info(json.dumps(record))
+
+
+def _registry(settings: ServingSettings):
+    """Manifest paths are relative to the project root, two levels above the manifests."""
+    root = Path(settings.manifests_root) if settings.manifests_root else None
+    if root is None or not root.is_dir():
+        return Registry(models=[], errors=[f"no manifests directory: {root}"])
+    return load_registry(root, root.parents[1])
 
 
 def _policy(application: FastAPI, settings: ServingSettings):

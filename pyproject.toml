@@ -9,6 +9,9 @@ description = "LLM-based VRP decision support"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "prometheus-client>=0.21",
     "pydantic>=2",
     "uvicorn>=0.32",
 ]
