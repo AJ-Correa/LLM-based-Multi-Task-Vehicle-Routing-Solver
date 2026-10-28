@@ -7,8 +7,8 @@ backend runs a multi-task neural routing policy that covers 16 single-depot vari
 model. A local LLM backend (Qwen2.5-7B-Instruct, before and after LoRA fine-tuning) will share
 the same request and response shapes.
 
-**Status:** `POST /solve` works for `backend=mtl`. The LLM backend, the evaluation harness, and
-the metrics are not built yet.
+**Status:** `POST /solve` works for `backend=mtl`. The LLM backend is in progress; it is an
+engineering demo inspired by LLMCoSolver, scoped in [`docs/paper_notes.md`](docs/paper_notes.md).
 
 ## Variants
 
