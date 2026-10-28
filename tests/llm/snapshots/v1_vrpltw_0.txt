@@ -1,5 +1,5 @@
 ### system
-Solve this VRPLTW instance. Node 0 is the depot; nodes 1 to 100 are customers. Minimize the total Euclidean distance traveled by all vehicles; use as many vehicles as needed. All numbers are integers: coordinates and times are scaled by 1000, demands are in units of capacity/1000.
+Solve this VRPLTW instance. Node 0 is the depot; every other node is a customer. Minimize the total Euclidean distance traveled by all vehicles; use as many vehicles as needed. All numbers are integers: coordinates and times are scaled by 1000, demands are in units of capacity/1000.
 
 Rules:
 - Visit every customer exactly once.

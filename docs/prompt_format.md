@@ -19,7 +19,8 @@ id x y demand open close service
 ```
 
 - Coordinates, times, service times, and the distance limit are multiplied by 1000 and
-  rounded. They share one scale, so travel time still equals distance.
+  rounded. Times are also multiplied by the vehicle speed (1 on the eval set), so they are in
+  distance units and travel time equals distance.
 - Demand is `(linehaul − backhaul) / capacity × 1000`, so the capacity is always 1000 and a
   pickup is negative. On the eval set every demand is a multiple of capacity/50, so this is
   exact.
@@ -45,25 +46,25 @@ both formats). All 1,600 eval instances (100 per variant, 100 customers). Measur
 
 | Variant | Labeled decimals | Integer table | Saved |
 | --- | ---: | ---: | ---: |
-| cvrp | 2,580 | 1,588 | 38.4% |
-| ovrp | 2,584 | 1,591 | 38.4% |
-| vrpb | 2,624 | 1,614 | 38.5% |
-| vrpl | 2,615 | 1,620 | 38.0% |
-| vrptw | 4,775 | 3,034 | 36.5% |
-| ovrptw | 4,761 | 3,025 | 36.5% |
-| ovrpb | 2,628 | 1,617 | 38.5% |
-| ovrpl | 2,607 | 1,613 | 38.1% |
-| vrpbl | 2,660 | 1,647 | 38.1% |
-| vrpbtw | 4,820 | 3,061 | 36.5% |
-| vrpltw | 4,810 | 3,066 | 36.3% |
-| ovrpbl | 2,652 | 1,640 | 38.1% |
-| ovrpbtw | 4,806 | 3,052 | 36.5% |
-| ovrpltw | 4,784 | 3,047 | 36.3% |
-| vrpbltw | 4,855 | 3,093 | 36.3% |
-| ovrpbltw | 4,829 | 3,074 | 36.3% |
-| **All 1,600** | **3,712** | **2,337** | **37.1%** |
+| cvrp | 2,580 | 1,584 | 38.6% |
+| ovrp | 2,584 | 1,587 | 38.6% |
+| vrpb | 2,624 | 1,610 | 38.6% |
+| vrpl | 2,615 | 1,616 | 38.2% |
+| vrptw | 4,775 | 3,030 | 36.5% |
+| ovrptw | 4,761 | 3,021 | 36.6% |
+| ovrpb | 2,628 | 1,613 | 38.6% |
+| ovrpl | 2,607 | 1,609 | 38.3% |
+| vrpbl | 2,660 | 1,643 | 38.2% |
+| vrpbtw | 4,820 | 3,057 | 36.6% |
+| vrpltw | 4,810 | 3,062 | 36.3% |
+| ovrpbl | 2,652 | 1,636 | 38.3% |
+| ovrpbtw | 4,806 | 3,048 | 36.6% |
+| ovrpltw | 4,784 | 3,043 | 36.4% |
+| vrpbltw | 4,855 | 3,089 | 36.4% |
+| ovrpbltw | 4,829 | 3,070 | 36.4% |
+| **All 1,600** | **3,712** | **2,333** | **37.2%** |
 
-Mean input tokens per prompt. Over the whole eval set: 5,939,000 → 3,738,460 tokens
+Mean input tokens per prompt. Over the whole eval set: 5,939,000 → 3,732,060 tokens
 (2.2 M fewer per full evaluation pass). The same saving applies to every SFT and FOARL
 training sequence, since they use this format.
 

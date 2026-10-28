@@ -40,7 +40,7 @@ def test_ovrpbltw_prompt_has_every_feature_and_no_return() -> None:
     system, user = (m["content"] for m in render(read_request(INSTANCE_SET, "ovrpbltw", 0)))
     for text in ("do not return", "pickup", "close time", "distance limit"):
         assert text in system
-    assert "return to the depot" not in system.replace("do not return to it", "")
+    assert "return to the depot" not in system and "Return to the depot" not in system
     assert "open close service" in user and "distance limit:" in user
 
 
@@ -67,3 +67,13 @@ def test_rows_round_trip_to_the_instance_at_three_decimals(variant: str) -> None
 def test_rendering_is_deterministic() -> None:
     request = read_request(INSTANCE_SET, "vrpltw", 7)
     assert render(request) == render(request)
+
+
+def test_times_are_written_in_distance_units() -> None:
+    request = read_request(INSTANCE_SET, "vrptw", 0)
+    request.instance.speed = 2.0
+    window = request.instance.time_windows[1]
+    row = _rows(render(request)[1]["content"])[1]
+    assert row[4:7] == [
+        round(v * 2 * SCALE) for v in (window.start, window.end, request.instance.service_times[1])
+    ]

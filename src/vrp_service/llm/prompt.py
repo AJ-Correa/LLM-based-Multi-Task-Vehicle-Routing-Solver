@@ -20,7 +20,6 @@ def render(request: SolveRequest, version: str = PROMPT_VERSION) -> list[dict[st
     folder = project_root() / "configs/prompts" / version
     system = Template(_read(folder / "system.txt")).substitute(
         variant_upper=request.variant.upper(),
-        customers=len(request.instance.nodes) - 1,
         constraints="\n".join(
             _read(folder / "constraints" / f"{name}.txt").strip() for name in _constraints(request)
         ),
@@ -57,8 +56,10 @@ def _instance(request: SolveRequest) -> str:
         demand = (node.demand_linehaul - node.demand_backhaul) / instance.capacity
         row = [node.id, _int(node.x), _int(node.y), _int(demand)]
         if flags.time_windows:
+            # Times in distance units, so "travel time equals distance" holds at any speed.
             window = instance.time_windows[position]
-            row += [_int(window.start), _int(window.end), _int(instance.service_times[position])]
+            times = [window.start, window.end, instance.service_times[position]]
+            row += [_int(value * instance.speed) for value in times]
         lines.append(" ".join(map(str, row)))
     return "\n".join(lines)
 
