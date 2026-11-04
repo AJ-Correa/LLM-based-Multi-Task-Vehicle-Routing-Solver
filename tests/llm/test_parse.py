@@ -99,3 +99,6 @@ def test_unknown_ids_and_empty_routes_are_rejected() -> None:
 def test_the_schema_allows_only_lists_of_integers() -> None:
     assert ROUTES_SCHEMA["additionalProperties"] is False
     assert ROUTES_SCHEMA["properties"]["routes"]["items"]["items"] == {"type": "integer"}
+    # Without maxItems lm-format-enforcer stops every list at 20 items.
+    routes = ROUTES_SCHEMA["properties"]["routes"]
+    assert routes["maxItems"] >= 1000 and routes["items"]["maxItems"] >= 1000

@@ -20,6 +20,7 @@ RUN uv sync --frozen --no-dev --group mtl --extra cpu --no-install-project
 
 COPY runtime ./runtime
 COPY artifacts/manifests ./artifacts/manifests
+COPY configs/prompts ./configs/prompts
 COPY src ./src
 RUN uv sync --frozen --no-dev --group mtl --extra cpu --no-editable
 

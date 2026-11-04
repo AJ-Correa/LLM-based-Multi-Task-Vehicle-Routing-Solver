@@ -4,12 +4,30 @@ from prometheus_client import Counter, Gauge, Histogram
 
 from vrp_service.contracts import SolveRequest, SolveResponse
 
-# Solves take about 0.5 s at 100 customers; the buckets resolve that range.
+# MTL solves take about 0.5 s at 100 customers; the top buckets cover LLM generation.
 SOLVE_SECONDS = Histogram(
     "vrp_solve_latency_seconds",
     "Time inside the solve call (latency_ms), by backend and variant.",
     ["backend", "variant"],
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 1.0, 2.5, 5.0, 10.0),
+    buckets=(
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.4,
+        0.5,
+        0.6,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+        120.0,
+    ),
 )
 SOLVES = Counter(
     "vrp_solves",

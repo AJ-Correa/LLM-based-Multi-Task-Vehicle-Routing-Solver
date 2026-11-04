@@ -7,8 +7,9 @@ and a parsed answer is judged by the same ``check_routes`` as the MTL policy.
 import json
 import re
 from dataclasses import dataclass
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from vrp_service.contracts import SolveRequest
 from vrp_service.env import Violation, check_routes, load_instance
@@ -17,10 +18,16 @@ from vrp_service.env import Violation, check_routes, load_instance
 FENCE = re.compile(r"^```[a-zA-Z]*\s*(.*?)\s*(?:```)?$", re.DOTALL)
 
 
+# Explicit, because lm-format-enforcer caps an array without maxItems at 20 items.
+MAX_ITEMS = 10_000
+
+
 class RoutesAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    routes: list[list[StrictInt]]
+    routes: list[Annotated[list[StrictInt], Field(max_length=MAX_ITEMS)]] = Field(
+        max_length=MAX_ITEMS
+    )
 
 
 # Constrains generation in the backend, so the model can only write this shape.

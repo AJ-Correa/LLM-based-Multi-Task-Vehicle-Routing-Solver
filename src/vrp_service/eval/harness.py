@@ -12,7 +12,6 @@ Warm-up solves run first and are not recorded.
 
 import argparse
 import json
-import math
 import time
 import urllib.error
 import urllib.request
@@ -22,9 +21,9 @@ from pathlib import Path
 from vrp_service.contracts import SolveRequest, SolveResponse
 from vrp_service.env import (
     SOLVER_ROUNDING_TOLERANCE,
-    EnvironmentInstance,
     check_routes,
     load_instance,
+    route_length,
 )
 from vrp_service.eval.instance_set import (
     InstanceSet,
@@ -57,13 +56,15 @@ def evaluate(
     items: Iterable[tuple[str, int]],
     solve: Solve,
     warmup: int = 0,
+    backend: str = "mtl",
 ) -> Iterator[dict]:
     """Yield one row per item as it finishes, so a long run keeps what it has done."""
     items = list(items)
     for number in range(warmup if items else 0):
-        _solve_safely(solve, read_request(instance_set, *items[number % len(items)]))
+        variant, index = items[number % len(items)]
+        _solve_safely(solve, read_request(instance_set, variant, index, backend))
     for variant, index in items:
-        request = read_request(instance_set, variant, index)
+        request = read_request(instance_set, variant, index, backend)
         started = time.perf_counter()
         response = _solve_safely(solve, request)
         wall_ms = (time.perf_counter() - started) * 1000
@@ -111,6 +112,8 @@ def score(
         "routes": routes,
         "latency_ms": response.latency_ms,
         "wall_ms": wall_ms,
+        "prompt_tokens": response.debug.get("prompt_tokens"),
+        "completion_tokens": response.debug.get("completion_tokens"),
     }
 
 
@@ -136,16 +139,6 @@ def gaps(
         both = feasible and row["feasible"]
         result[f"gap_{solver}"] = (row["objective_value"] - reference) / reference if both else None
     return result
-
-
-def route_length(instance: EnvironmentInstance, routes: list[list[int]]) -> float:
-    """Euclidean length in float64; routes already omit an open route's return leg."""
-    index = {node: position for position, node in enumerate(instance.node_ids)}
-    return sum(
-        math.dist(instance.locs[index[a]], instance.locs[index[b]])
-        for route in routes
-        for a, b in zip(route, route[1:])
-    )
 
 
 def markdown(rows: list[dict], header: dict[str, object]) -> str:
@@ -193,8 +186,10 @@ def _ms(values: list[float], q: float) -> str:
     return f"{percentile(values, q):.1f}" if values else "-"
 
 
-def in_process(settings: ServingSettings) -> tuple[Solve, float | None]:
-    """A solver that calls the policy directly, and the load time when it loaded."""
+def in_process(settings: ServingSettings, backend: str = "mtl") -> tuple[Solve, float | None]:
+    """A solver that calls the model directly, and the load time when it loaded."""
+    if backend == "llm":
+        return _in_process_llm(settings)
     from vrp_service.serving.solve import solve_mtl
 
     policy = None
@@ -210,6 +205,28 @@ def in_process(settings: ServingSettings) -> tuple[Solve, float | None]:
 
     def solve(request: SolveRequest) -> SolveResponse:
         return solve_mtl(request, policy, settings.model_version)
+
+    return solve, load_ms
+
+
+def _in_process_llm(settings: ServingSettings) -> tuple[Solve, float | None]:
+    from vrp_service.serving.solve import solve_llm
+
+    generate = None
+    load_ms = None
+    if settings.llm_model_path:
+        from vrp_service.llm.generate import generate as generate_answer
+        from vrp_service.llm.generate import load_llm
+
+        started = time.perf_counter()
+        llm = load_llm(settings.llm_model_path, max_new_tokens=settings.llm_max_new_tokens)
+        load_ms = (time.perf_counter() - started) * 1000
+
+        def generate(messages: list[dict[str, str]]):
+            return generate_answer(llm, messages)
+
+    def solve(request: SolveRequest) -> SolveResponse:
+        return solve_llm(request, generate, settings.llm_model_version)
 
     return solve, load_ms
 
@@ -257,6 +274,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--smoke", action="store_true", help="only the two CI smoke instances")
     parser.add_argument("--limit", type=int, help="first N instances per variant")
     parser.add_argument("--warmup", type=int, default=5)
+    parser.add_argument("--backend", choices=["mtl", "llm"], default="mtl")
     args = parser.parse_args(argv)
 
     root = project_root()
@@ -265,16 +283,21 @@ def main(argv: list[str] | None = None) -> None:
         items = select(instance_set, args.smoke, args.limit)
     except ValueError as error:
         parser.error(str(error))
-    header: dict[str, object] = {"instance set": instance_set.name, "mode": args.mode}
+    header: dict[str, object] = {
+        "instance set": instance_set.name,
+        "backend": args.backend,
+        "mode": args.mode,
+    }
     if args.mode == "http":
         solve = over_http(args.url)
         header["url"] = args.url
         header["server ready"] = server_ready(args.url)
     else:
         settings = ServingSettings.from_env()
-        solve, load_ms = in_process(settings)
-        header["device"] = settings.device
-        if settings.device == "cpu":
+        solve, load_ms = in_process(settings, args.backend)
+        if args.backend == "mtl":
+            header["device"] = settings.device
+        if args.backend == "mtl" and settings.device == "cpu":
             header["cpu threads"] = settings.cpu_threads
         header["policy load ms"] = "not loaded" if load_ms is None else f"{load_ms:.0f}"
     header["warm-up solves"] = args.warmup
@@ -283,7 +306,7 @@ def main(argv: list[str] | None = None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     with out.open("w") as handle:
-        for row in evaluate(instance_set, items, solve, args.warmup):
+        for row in evaluate(instance_set, items, solve, args.warmup, args.backend):
             handle.write(json.dumps(row) + "\n")
             handle.flush()
             rows.append(row)
