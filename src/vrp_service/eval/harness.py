@@ -3,6 +3,7 @@
     python -m vrp_service.eval.harness --out results/mtl.jsonl
     python -m vrp_service.eval.harness --smoke --out results/smoke.jsonl
     python -m vrp_service.eval.harness --mode http --url http://localhost:8000 --out ...
+    python -m vrp_service.eval.harness --report results/llm_smoke.jsonl
 
 ``latency_ms`` is the solve clock inside ``solve_mtl``: decode, route split, and the
 feasibility check. ``wall_ms`` is what the harness waits for one solve: the same call
@@ -156,7 +157,43 @@ def markdown(rows: list[dict], header: dict[str, object]) -> str:
         groups.append(("all", rows))
     for name, group in groups:
         lines.append(_table_row(name, group))
+    if any(row.get("prompt_tokens") is not None for row in rows):
+        lines += ["", *outcomes(groups)]
     return "\n".join(lines) + "\n"
+
+
+LLM_ERRORS = ("truncated", "invalid_json", "schema", "generation_failed")
+
+
+def outcomes(groups: list[tuple[str, list[dict]]]) -> list[str]:
+    """LLM outcomes: each row is feasible, infeasible, or one error kind."""
+    lines = [
+        "| Variant | n | Parsed | Feasible | Infeasible | "
+        + " | ".join(LLM_ERRORS)
+        + " | Other errors | Mean prompt tokens | Mean output tokens |",
+        "| --- " * (8 + len(LLM_ERRORS)) + "|",
+    ]
+    for name, rows in groups:
+        parsed = [row for row in rows if row["status"] == "ok"]
+        feasible = sum(row["feasible"] for row in parsed)
+        errors = [row["error_type"] for row in rows if row["status"] != "ok"]
+        cells = [
+            name,
+            str(len(rows)),
+            f"{len(parsed) / len(rows):.1%}",
+            str(feasible),
+            str(len(parsed) - feasible),
+            *(str(errors.count(kind)) for kind in LLM_ERRORS),
+            str(sum(kind not in LLM_ERRORS for kind in errors)),
+            *(_mean_tokens(rows, key) for key in ("prompt_tokens", "completion_tokens")),
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
+def _mean_tokens(rows: list[dict], key: str) -> str:
+    values = [row[key] for row in rows if row.get(key) is not None]
+    return f"{sum(values) / len(values):,.0f}" if values else "-"
 
 
 def _table_row(name: str, rows: list[dict]) -> str:
@@ -268,7 +305,8 @@ def main(argv: list[str] | None = None) -> None:
     """Exit 1 when no instance was solved, for example when the policy is missing."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", default=DEFAULT_CONFIG)
-    parser.add_argument("--out", required=True, help="JSONL path; the table goes next to it as .md")
+    parser.add_argument("--out", help="JSONL path; the table goes next to it as .md")
+    parser.add_argument("--report", metavar="JSONL", help="print the tables of an earlier run")
     parser.add_argument("--mode", choices=["inprocess", "http"], default="inprocess")
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--smoke", action="store_true", help="only the two CI smoke instances")
@@ -276,6 +314,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--backend", choices=["mtl", "llm"], default="mtl")
     args = parser.parse_args(argv)
+    if args.report:
+        rows = [json.loads(line) for line in Path(args.report).read_text().splitlines() if line]
+        print(markdown(rows, {"report of": args.report}), end="")
+        return
+    if not args.out:
+        parser.error("--out is required unless --report is given")
 
     root = project_root()
     instance_set = load_instance_set(root / args.config, root)

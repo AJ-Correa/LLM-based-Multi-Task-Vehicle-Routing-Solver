@@ -49,7 +49,18 @@ LLM_MODEL_PATH=artifacts/llm/qwen2.5-7b-instruct \
 ```
 
 Each JSONL row has `prompt_tokens` and `completion_tokens` beside the cost, gaps, feasibility,
-and latency. `--limit N` runs the first N instances of every variant.
+and latency. `--limit N` runs the first N instances of every variant. LLM runs add an outcome
+table (parsed, feasible, infeasible, each error kind, mean tokens);
+`--report results/llm_smoke.jsonl` prints the tables again from an earlier run.
+
+On a Slurm cluster, from the repo root with the environment set up:
+
+```bash
+sbatch -A <account> -p <gpu partition> scripts/slurm/eval.sbatch \
+  --backend llm --smoke --warmup 1 --out results/llm_smoke.jsonl
+```
+
+GPU memory is sampled every 30 s into `slurm-<job>.gpu.csv`.
 
 ## Serve it
 

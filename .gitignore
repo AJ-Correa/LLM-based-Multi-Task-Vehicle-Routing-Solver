@@ -9,3 +9,5 @@ build/
 artifacts/checkpoints/
 artifacts/llm/
 results/
+slurm-*.out
+slurm-*.gpu.csv

@@ -147,3 +147,32 @@ def test_an_infeasible_answer_has_no_gap() -> None:
 
     [row] = evaluate(INSTANCE_SET, [("cvrp", 0)], drop_last_route)
     assert row["gap_pyvrp"] is None and row["gap_ortools"] is None
+
+
+def _llm_row(variant: str, status: str, feasible: bool, error_type: str | None) -> dict:
+    return {
+        "variant": variant, "status": status, "feasible": feasible, "error_type": error_type,
+        "objective_value": 1.0 if feasible else None, "latency_ms": 10.0, "wall_ms": 10.0,
+        "prompt_tokens": 2000, "completion_tokens": 300,
+    }
+
+
+def test_llm_rows_get_an_outcome_table_and_report_rebuilds_it(tmp_path, capsys) -> None:
+    rows = [
+        _llm_row("cvrp", "ok", True, None),
+        _llm_row("cvrp", "ok", False, None),
+        _llm_row("vrptw", "error", False, "truncated"),
+        _llm_row("vrptw", "error", False, "harness_KeyError"),
+    ]
+    table = markdown(rows, {})
+    header, separator, *body = table.split("\n\n")[-1].strip().splitlines()
+    assert header.count("|") == separator.count("|")
+    overall = [cell.strip() for cell in body[-1].strip("|").split("|")]
+    # all, n, parsed, feasible, infeasible, truncated, invalid_json, schema, failed, other, tokens
+    assert overall == ["all", "4", "50.0%", "1", "1", "1", "0", "0", "0", "1", "2,000", "300"]
+    assert "Parsed" not in markdown([{**row, "prompt_tokens": None} for row in rows], {})
+
+    out = tmp_path / "llm.jsonl"
+    out.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    main(["--report", str(out)])
+    assert capsys.readouterr().out.strip().endswith(body[-1].strip())
