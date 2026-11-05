@@ -71,3 +71,19 @@ def test_few_shot_examples_come_from_labelled_training_data(tmp_path) -> None:
         assert parse_routes(reply["content"], example).violations == []
     with pytest.raises(ValueError, match="feasible"):
         load_examples(tmp_path, 3)
+
+
+def test_sft_rows_hold_out_the_last_instances_of_every_variant(tmp_path) -> None:
+    from vrp_service.contracts import TRAINING_VARIANTS
+    from vrp_service.llm.prompt import render
+    from vrp_service.train.sft import rows
+
+    generate.main(["--per-variant", "3", "--seed", "8", "--out", str(tmp_path)])
+    for variant in TRAINING_VARIANTS:
+        label.main(["--root", str(tmp_path), "--variant", variant, "--seconds", "0.2"])
+    train, held_out = rows(str(tmp_path), holdout=1)
+    assert len(train) == 2 * len(TRAINING_VARIANTS) and len(held_out) == len(TRAINING_VARIANTS)
+    assert not {str(row["prompt"]) for row in train} & {str(row["prompt"]) for row in held_out}
+    request = read_request(INSTANCE_SET, "cvrp", 0, "llm")
+    assert [m["role"] for m in train[0]["prompt"]] == [m["role"] for m in render(request)]
+    assert len(rows(str(tmp_path), holdout=1, limit=1)[0]) == len(TRAINING_VARIANTS)

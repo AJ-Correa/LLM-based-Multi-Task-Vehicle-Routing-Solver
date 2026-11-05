@@ -41,6 +41,7 @@ login node and point `LLM_MODEL_PATH` at the folder.
 | `LLM_QUANTIZATION` | `none` | `none` (bf16), `8bit`, or `4bit` (NF4). Quantization saves memory but decodes more slowly; 4-bit is meant for QLoRA training |
 | `LLM_FEW_SHOT` | `0` | Solved examples per prompt (harness only); 0 is zero-shot. Each adds about 2,450 prompt tokens: mean 2,350 / 4,800 / 7,300 / 9,700 tokens for k = 0 / 1 / 2 / 3 |
 | `LLM_FEW_SHOT_ROOT` | `data/train/n100` | Labelled training set the examples come from: the first k PyVRP-feasible instances of the request's variant |
+| `LLM_ADAPTER_PATH` | unset | LoRA adapter folder merged into the bf16 base at load (needs the `train` group). The adapter is trained on a 4-bit base and scored merged |
 
 ## Score it on the smoke set
 
@@ -84,6 +85,23 @@ sbatch -A <cpu account> -p <cpu partition> scripts/slurm/label.sbatch data/train
   stored 20 s PyVRP cost.
 - `data/train/` is git-ignored; the seed regenerates it.
 
+## Fine-tune (QLoRA SFT)
+
+```bash
+uv sync --group train --group llm --group data --extra gpu
+sbatch -A <account> -p <gpu partition> scripts/slurm/sft.sbatch \
+  --data data/train/n100 --model "$LLM_MODEL_PATH" --out artifacts/llm/adapters/sft-v1
+```
+
+- Rows: the eval prompt (`render`) and the PyVRP routes as the compact JSON answer, loss on
+  the answer only. The last 10 feasible instances of each variant are held out for eval loss.
+- 4-bit NF4 base (double quantization), LoRA rank 64, alpha 64, dropout 0.05, on every
+  attention and MLP projection. Defaults: 1 epoch, learning rate 2e-4 (cosine, 3% warm-up),
+  batch 4 × 4 accumulation steps, sequences up to 4,096 tokens.
+- `--limit N` trains on N rows per variant, for a quick check. Checkpoints every 100 steps;
+  resubmitting resumes.
+- Score it with `LLM_ADAPTER_PATH=artifacts/llm/adapters/sft-v1` and the eval job script.
+
 ## Serve it
 
 ```bash
@@ -125,3 +143,18 @@ Deucalion, one A100-SXM4-40GB, smoke set (2 instances), 1 warm-up solve.
 - bitsandbytes logs one `MatMul8bitLt` warning per 8-bit matmul (about 195,000 lines here).
 - At this speed the full set (1,600 solves) would take about 17 hours. This is why inference
   defaults to bf16.
+
+### bf16, 2026-11-05
+
+Same GPU and smoke set, `LLM_QUANTIZATION=none`.
+
+| | cvrp | ovrpbltw |
+| --- | --- | --- |
+| Outcome | parsed, infeasible | parsed, infeasible |
+| Prompt / output tokens | 1,600 / 325 | 3,094 / 298 |
+| Solve time | 8.4 s | 8.0 s |
+
+- About 38 output tokens per second (4.7× the 8-bit run); peak GPU memory 15.7 GB.
+- Load: about 105 s, of which importing torch and transformers from the cluster's shared
+  filesystem is about 70–85 s and the weights 8–29 s. Once per job, so left as is.
+- Full set at this speed: about 3.6 hours.

@@ -36,9 +36,13 @@ class LoadedLlm:
 
 
 def load_llm(
-    model_path: str, quantization: str = "none", max_new_tokens: int = MAX_NEW_TOKENS
+    model_path: str,
+    quantization: str = "none",
+    max_new_tokens: int = MAX_NEW_TOKENS,
+    adapter_path: str | None = None,
 ) -> LoadedLlm:
-    """``model_path`` is a local folder or a Hub id already in the cache."""
+    """``model_path`` is a local folder or a Hub id already in the cache. A LoRA adapter, if
+    given, is merged into the base (it was trained on a 4-bit base; it is scored merged)."""
     if quantization not in QUANTIZATIONS:
         raise ValueError(f"quantization must be one of {QUANTIZATIONS}, not {quantization!r}")
     from lmformatenforcer.integrations.transformers import build_token_enforcer_tokenizer_data
@@ -55,6 +59,10 @@ def load_llm(
     model = AutoModelForCausalLM.from_pretrained(
         model_path, quantization_config=config, dtype="auto", device_map="auto"
     )
+    if adapter_path:
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(model, adapter_path).merge_and_unload()
     model.eval()
     whitespace = frozenset(
         token

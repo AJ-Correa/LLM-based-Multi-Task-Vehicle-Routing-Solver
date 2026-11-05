@@ -265,6 +265,7 @@ def _in_process_llm(settings: ServingSettings) -> tuple[Solve, float | None]:
             settings.llm_model_path,
             settings.llm_quantization,
             max_new_tokens=settings.llm_max_new_tokens,
+            adapter_path=settings.llm_adapter_path,
         )
         load_ms = (time.perf_counter() - started) * 1000
 
@@ -354,6 +355,7 @@ def main(argv: list[str] | None = None) -> None:
         else:
             header["quantization"] = settings.llm_quantization
             header["few-shot examples"] = settings.llm_few_shot
+            header["adapter"] = settings.llm_adapter_path or "none"
         if args.backend == "mtl" and settings.device == "cpu":
             header["cpu threads"] = settings.cpu_threads
         header["policy load ms"] = "not loaded" if load_ms is None else f"{load_ms:.0f}"

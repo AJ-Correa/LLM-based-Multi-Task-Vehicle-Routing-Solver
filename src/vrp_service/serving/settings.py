@@ -27,6 +27,8 @@ class ServingSettings:
     llm_quantization: str = "none"
     # Solved training examples per prompt; 0 is zero-shot. Read by the eval harness.
     llm_few_shot: int = 0
+    # A LoRA adapter folder merged into the base at load; needs the `train` group (peft).
+    llm_adapter_path: str | None = None
     llm_few_shot_root: str | None = None
 
     @classmethod
@@ -47,6 +49,7 @@ class ServingSettings:
             llm_max_new_tokens=int(os.environ.get("LLM_MAX_NEW_TOKENS") or 1024),
             llm_quantization=os.environ.get("LLM_QUANTIZATION") or "none",
             llm_few_shot=int(os.environ.get("LLM_FEW_SHOT") or 0),
+            llm_adapter_path=os.environ.get("LLM_ADAPTER_PATH") or None,
             llm_few_shot_root=os.environ.get("LLM_FEW_SHOT_ROOT") or str(root / "data/train/n100"),
         )
 

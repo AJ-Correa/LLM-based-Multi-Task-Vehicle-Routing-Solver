@@ -15,4 +15,4 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 export HF_HUB_OFFLINE=1 UV_OFFLINE=1
 nvidia-smi --query-gpu=name,memory.used --format=csv -l 30 > "slurm-$SLURM_JOB_ID.gpu.csv" &
-uv run --frozen --group llm --group mtl --extra gpu python -m vrp_service.eval.harness "$@"
+uv run --frozen --group llm --group mtl --group train --extra gpu python -m vrp_service.eval.harness "$@"

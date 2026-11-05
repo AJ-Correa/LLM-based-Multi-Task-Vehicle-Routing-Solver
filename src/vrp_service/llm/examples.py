@@ -10,15 +10,15 @@ from vrp_service.llm.prompt import Example
 from vrp_service.serving.solve import routes_from_tour
 
 
-def load_examples(root: str | Path, count: int) -> dict[str, list[Example]]:
-    """The first ``count`` feasible labelled instances of every variant under ``root``."""
+def load_examples(root: str | Path, count: int | None = None) -> dict[str, list[Example]]:
+    """The first ``count`` (default: all) feasible labelled instances of every variant."""
     root = Path(root)
     examples: dict[str, list[Example]] = {}
     for variant, flags in TRAINING_VARIANTS.items():
         with np.load(root / variant / "100_sol_pyvrp.npz") as solved:
             indices = np.flatnonzero(solved["feasible"])[:count].tolist()
             tours = [solved["actions"][index].tolist() for index in indices]
-        if len(indices) < count:
+        if count is not None and len(indices) < count:
             raise ValueError(f"{variant}: only {len(indices)} feasible labelled instances")
         training = InstanceSet("train", root, "100.npz", {}, 0, [], {})
         examples[variant] = [

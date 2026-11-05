@@ -180,6 +180,7 @@ def _llm(application: FastAPI, settings: ServingSettings):
                 settings.llm_model_path,
                 settings.llm_quantization,
                 max_new_tokens=settings.llm_max_new_tokens,
+                adapter_path=settings.llm_adapter_path,
             )
         except Exception as error:  # noqa: BLE001
             application.state.llm_failed = True
