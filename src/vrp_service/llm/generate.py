@@ -1,4 +1,4 @@
-"""Load Qwen2.5-7B-Instruct in 8-bit and generate one JSON answer per request.
+"""Load Qwen2.5-7B-Instruct (bf16 by default) and generate one JSON answer per request.
 
 Decoding is greedy, so the baseline is reproducible, and the tokens are restricted to
 ``ROUTES_SCHEMA`` by lm-format-enforcer, with no whitespace, so the answer is compact JSON.
@@ -11,6 +11,9 @@ from typing import Any
 from vrp_service.llm.parse import ROUTES_SCHEMA
 
 MAX_NEW_TOKENS = 1024
+# bitsandbytes saves memory but decodes more slowly than bf16 on an A100 (8-bit: ~8.5 tokens/s on
+# the smoke run), so inference defaults to "none"; 4-bit is for QLoRA training.
+QUANTIZATIONS = ("none", "8bit", "4bit")
 
 
 @dataclass(frozen=True)
@@ -33,19 +36,24 @@ class LoadedLlm:
 
 
 def load_llm(
-    model_path: str, quantize: bool = True, max_new_tokens: int = MAX_NEW_TOKENS
+    model_path: str, quantization: str = "none", max_new_tokens: int = MAX_NEW_TOKENS
 ) -> LoadedLlm:
     """``model_path`` is a local folder or a Hub id already in the cache."""
+    if quantization not in QUANTIZATIONS:
+        raise ValueError(f"quantization must be one of {QUANTIZATIONS}, not {quantization!r}")
     from lmformatenforcer.integrations.transformers import build_token_enforcer_tokenizer_data
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-    quantization = BitsAndBytesConfig(load_in_8bit=True) if quantize else None
+    config = {
+        "none": None,
+        "8bit": BitsAndBytesConfig(load_in_8bit=True),
+        "4bit": BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype="bfloat16"
+        ),
+    }[quantization]
     model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        quantization_config=quantization,
-        dtype="auto",
-        device_map="auto" if quantize else None,
+        model_path, quantization_config=config, dtype="auto", device_map="auto"
     )
     model.eval()
     whitespace = frozenset(

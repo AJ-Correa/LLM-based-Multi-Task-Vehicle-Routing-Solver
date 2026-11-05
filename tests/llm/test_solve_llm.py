@@ -38,6 +38,7 @@ def test_a_feasible_answer_returns_routes_cost_and_tokens() -> None:
     assert response.debug == {
         "prompt_tokens": 1500,
         "completion_tokens": 300,
+        "few_shot": 0,
         "hit_token_limit": False,
     }
 

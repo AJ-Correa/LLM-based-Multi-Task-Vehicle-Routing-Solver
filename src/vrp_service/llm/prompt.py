@@ -4,8 +4,13 @@ Every number is an integer scaled by ``SCALE`` (3-decimal precision), because Qw
 numbers into single digits and a leading ``0.`` costs two tokens. Coordinates, times, and
 the distance limit share one scale, so travel time still equals distance.
 The model answers with customer ids only; the parser adds the depot.
+
+Few-shot examples go before the question as earlier user and assistant turns, so the question
+itself reads the same with or without them.
 """
 
+import json
+from collections.abc import Sequence
 from pathlib import Path
 from string import Template
 
@@ -14,9 +19,13 @@ from vrp_service.serving.settings import project_root
 
 PROMPT_VERSION = "v1"
 SCALE = 1000
+# A solved example: the request and its routes as customer ids, without the depot.
+Example = tuple[SolveRequest, list[list[int]]]
 
 
-def render(request: SolveRequest, version: str = PROMPT_VERSION) -> list[dict[str, str]]:
+def render(
+    request: SolveRequest, version: str = PROMPT_VERSION, examples: Sequence[Example] = ()
+) -> list[dict[str, str]]:
     folder = project_root() / "configs/prompts" / version
     system = Template(_read(folder / "system.txt")).substitute(
         variant_upper=request.variant.upper(),
@@ -24,11 +33,21 @@ def render(request: SolveRequest, version: str = PROMPT_VERSION) -> list[dict[st
             _read(folder / "constraints" / f"{name}.txt").strip() for name in _constraints(request)
         ),
     )
-    user = Template(_read(folder / "user.txt")).substitute(instance=_instance(request))
-    return [
-        {"role": "system", "content": system.strip()},
-        {"role": "user", "content": user.strip()},
-    ]
+    user = Template(_read(folder / "user.txt"))
+    messages = [{"role": "system", "content": system.strip()}]
+    for example, routes in examples:
+        messages += [
+            {"role": "user", "content": user.substitute(instance=_instance(example)).strip()},
+            {"role": "assistant", "content": answer(routes)},
+        ]
+    question = user.substitute(instance=_instance(request)).strip()
+    messages.append({"role": "user", "content": question})
+    return messages
+
+
+def answer(routes: list[list[int]]) -> str:
+    """The answer exactly as constrained decoding writes it: compact JSON."""
+    return json.dumps({"routes": routes}, separators=(",", ":"))
 
 
 def _constraints(request: SolveRequest) -> list[str]:

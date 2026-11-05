@@ -1,7 +1,7 @@
 # LLM backend runbook
 
-How to run `backend=llm`: Qwen2.5-7B-Instruct in 8-bit (bitsandbytes), greedy decoding, output
-constrained to compact `{"routes": [[int, ...], ...]}` by lm-format-enforcer. Two enforcer
+How to run `backend=llm`: Qwen2.5-7B-Instruct in bf16 (quantization optional), greedy decoding,
+output constrained to compact `{"routes": [[int, ...], ...]}` by lm-format-enforcer. Two enforcer
 defaults are overridden: the schema sets `maxItems` (without it every list stops at 20 items),
 and tokens containing whitespace are banned (otherwise the model can spend its token budget on
 whitespace between JSON tokens). The prompt format is in
@@ -9,9 +9,8 @@ whitespace between JSON tokens). The prompt format is in
 
 ## Requirements
 
-- An NVIDIA GPU with CUDA. 8-bit loading does not run on CPU.
-- About 15 GB of disk for the weights and roughly 8–9 GB of GPU memory for them (to be
-  replaced by the measured peak after the first smoke run).
+- An NVIDIA GPU with CUDA. About 15 GB of disk for the weights; GPU memory is about 16 GB in
+  bf16 and 9.8 GB in 8-bit (measured).
 - The `llm` dependency group and the CUDA torch build:
 
 ```bash
@@ -39,6 +38,9 @@ login node and point `LLM_MODEL_PATH` at the folder.
 | `LLM_MODEL_PATH` | unset | Model folder or cached Hub id. Unset, or a load that fails (logged), keeps the LLM backend off; the MTL backend still serves |
 | `LLM_MODEL_VERSION` | `llm/v0.1.0` | Version string on responses, logs, spans, and metrics |
 | `LLM_MAX_NEW_TOKENS` | `1024` | Generation cap; hitting it is reported as `truncated` |
+| `LLM_QUANTIZATION` | `none` | `none` (bf16), `8bit`, or `4bit` (NF4). Quantization saves memory but decodes more slowly; 4-bit is meant for QLoRA training |
+| `LLM_FEW_SHOT` | `0` | Solved examples per prompt (harness only); 0 is zero-shot. Each adds about 2,450 prompt tokens: mean 2,350 / 4,800 / 7,300 / 9,700 tokens for k = 0 / 1 / 2 / 3 |
+| `LLM_FEW_SHOT_ROOT` | `data/train/n100` | Labelled training set the examples come from: the first k PyVRP-feasible instances of the request's variant |
 
 ## Score it on the smoke set
 
@@ -61,6 +63,26 @@ sbatch -A <account> -p <gpu partition> scripts/slurm/eval.sbatch \
 ```
 
 GPU memory is sampled every 30 s into `slurm-<job>.gpu.csv`.
+
+## Training data and few-shot examples
+
+Few-shot examples and the later SFT data come from generated instances, labelled by PyVRP.
+They are never eval instances: generation stops if any instance shares coordinates with one.
+
+```bash
+uv sync --group data --group mtl --extra gpu
+uv run python -m vrp_service.data.generate --per-variant 500 --seed 1 --out data/train/n100
+sbatch -A <cpu account> -p <cpu partition> scripts/slurm/label.sbatch data/train/n100
+```
+
+- `generate` uses the multi-task environment's generator, the source of the eval instances,
+  and writes `<variant>/100.npz` in the eval file format. Variant seed: `seed * 100 + index`.
+- `label` solves every instance with PyVRP (20 s, one array task per variant, one instance
+  per CPU) into `<variant>/100_sol_pyvrp.npz`: `actions`, `costs`, and `feasible`, the
+  result of `check_routes` at the model's tolerance. The PyVRP model mirrors the checker; on
+  two eval instances per variant at 5 s, all 32 routes were feasible and within 2% of the
+  stored 20 s PyVRP cost.
+- `data/train/` is git-ignored; the seed regenerates it.
 
 ## Serve it
 
@@ -88,5 +110,18 @@ response carries `prompt_version`, and `debug` holds `prompt_tokens`, `completio
 
 ## Measured
 
-Not yet run on the 7B weights. The smoke run records load time, seconds per instance, output
-tokens per second, and peak GPU memory here.
+### 8-bit, 2026-11-04
+
+Deucalion, one A100-SXM4-40GB, smoke set (2 instances), 1 warm-up solve.
+
+| | cvrp | ovrpbltw |
+| --- | --- | --- |
+| Outcome | parsed, infeasible (missed and repeated customers) | parsed, infeasible (one route, five violation kinds) |
+| Prompt / output tokens | 1,600 / 348 | 3,094 / 298 |
+| Solve time | 40.7 s | 37.1 s |
+
+- Load: 115 s (12 s reading shards; the rest is quantizing and the whitespace-token scan).
+- About 8.5 output tokens per second; peak GPU memory 9.8 GB.
+- bitsandbytes logs one `MatMul8bitLt` warning per 8-bit matmul (about 195,000 lines here).
+- At this speed the full set (1,600 solves) would take about 17 hours. This is why inference
+  defaults to bf16.

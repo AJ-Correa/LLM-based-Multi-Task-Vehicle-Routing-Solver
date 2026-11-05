@@ -177,7 +177,9 @@ def _llm(application: FastAPI, settings: ServingSettings):
 
         try:
             application.state.llm = load_llm(
-                settings.llm_model_path, max_new_tokens=settings.llm_max_new_tokens
+                settings.llm_model_path,
+                settings.llm_quantization,
+                max_new_tokens=settings.llm_max_new_tokens,
             )
         except Exception as error:  # noqa: BLE001
             application.state.llm_failed = True

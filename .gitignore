@@ -11,3 +11,4 @@ artifacts/llm/
 results/
 slurm-*.out
 slurm-*.gpu.csv
+data/train/

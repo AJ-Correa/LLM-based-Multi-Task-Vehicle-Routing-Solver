@@ -42,6 +42,9 @@ llm = [
     # lm-format-enforcer 0.11 imports transformers 4.x internals.
     "transformers>=4.46,<5",
 ]
+data = [
+    "pyvrp>=0.11",
+]
 
 # Pick one torch build: `cpu` for the API image, `gpu` (the PyPI CUDA wheel) for local runs.
 [project.optional-dependencies]

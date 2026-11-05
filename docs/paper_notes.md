@@ -17,8 +17,9 @@ rate and an average optimality gap of 1.03–8.20%.
 
 ## What this project takes
 
-- One base model, Qwen2.5-7B-Instruct in 8-bit, and one LoRA adapter (rank 64, alpha 64)
-  trained on a mixture of the 16 single-depot variants.
+- One base model, Qwen2.5-7B-Instruct, and one QLoRA adapter (4-bit NF4 base, rank 64,
+  alpha 64) trained on a mixture of the 16 single-depot variants. Inference runs in bf16, with
+  the adapter merged for evaluation; quantized decoding was slower on the A100.
 - The instance goes in as text; the routes come out as JSON.
 - SFT on PyVRP solutions (20 s per instance), then one small FOARL pass.
 - Every output goes through the same `check_routes` as the MTL policy.
@@ -42,6 +43,7 @@ heuristic's work into the model's score.
 ## How the LLM is measured
 
 The same frozen protocol as `docs/results.md`: 1,600 instances (100 per variant, 100
-customers), the same checker and harness, gaps to the stored PyVRP and OR-Tools routes. Three
-rows, base, base + SFT, base + SFT + FOARL, with two extra columns: parse success and an
+customers), the same checker and harness, gaps to the stored PyVRP and OR-Tools routes. Four
+rows, zero-shot, few-shot (solved training examples in the prompt), QLoRA SFT, and QLoRA SFT +
+FOARL, with two extra columns: parse success and an
 error breakdown. The smoke set runs first to measure speed; the full run is decided from that.

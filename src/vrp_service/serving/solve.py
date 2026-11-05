@@ -13,7 +13,7 @@ from vrp_service.contracts import Route, SolveRequest, SolveResponse
 from vrp_service.env import EnvironmentInstance, check_routes, load_instance, route_length
 from vrp_service.llm.generate import Generation
 from vrp_service.llm.parse import ParsedRoutes, ParseError, parse_routes
-from vrp_service.llm.prompt import PROMPT_VERSION, render
+from vrp_service.llm.prompt import PROMPT_VERSION, Example, render
 from vrp_service.mtl.decode import decode_request
 from vrp_service.observability.tracing import tracer
 from vrp_service.serving.settings import LLM_MODEL_VERSION, MODEL_VERSION
@@ -69,8 +69,11 @@ def solve_llm(
     request: SolveRequest,
     generate: Generate | None,
     model_version: str = LLM_MODEL_VERSION,
+    examples: Sequence[Example] = (),
 ) -> SolveResponse:
-    return _traced(request, model_version, lambda: _solve_llm(request, generate, model_version))
+    return _traced(
+        request, model_version, lambda: _solve_llm(request, generate, model_version, examples)
+    )
 
 
 def _traced(
@@ -122,7 +125,10 @@ def _solve(request: SolveRequest, policy: Policy | None, model_version: str) -> 
 
 
 def _solve_llm(
-    request: SolveRequest, generate: Generate | None, model_version: str
+    request: SolveRequest,
+    generate: Generate | None,
+    model_version: str,
+    examples: Sequence[Example] = (),
 ) -> SolveResponse:
     started = time.perf_counter()
     if request.backend != "llm":
@@ -130,7 +136,7 @@ def _solve_llm(
     if generate is None:
         return _error(request, model_version, "model_unavailable", started)
     with tracer.start_as_current_span("render"):
-        messages = render(request)
+        messages = render(request, examples=examples)
     try:
         with tracer.start_as_current_span("generate") as span:
             generation = generate(messages)
@@ -143,6 +149,7 @@ def _solve_llm(
         "prompt_tokens": generation.prompt_tokens,
         "completion_tokens": generation.completion_tokens,
         "hit_token_limit": generation.hit_limit,
+        "few_shot": len(examples),
     }
     if request.options.return_debug:
         debug["raw_output"] = generation.text

@@ -24,6 +24,10 @@ class ServingSettings:
     llm_model_path: str | None = None
     llm_model_version: str = LLM_MODEL_VERSION
     llm_max_new_tokens: int = 1024
+    llm_quantization: str = "none"
+    # Solved training examples per prompt; 0 is zero-shot. Read by the eval harness.
+    llm_few_shot: int = 0
+    llm_few_shot_root: str | None = None
 
     @classmethod
     def from_env(cls) -> "ServingSettings":
@@ -41,6 +45,9 @@ class ServingSettings:
             llm_model_path=os.environ.get("LLM_MODEL_PATH") or None,
             llm_model_version=os.environ.get("LLM_MODEL_VERSION") or LLM_MODEL_VERSION,
             llm_max_new_tokens=int(os.environ.get("LLM_MAX_NEW_TOKENS") or 1024),
+            llm_quantization=os.environ.get("LLM_QUANTIZATION") or "none",
+            llm_few_shot=int(os.environ.get("LLM_FEW_SHOT") or 0),
+            llm_few_shot_root=os.environ.get("LLM_FEW_SHOT_ROOT") or str(root / "data/train/n100"),
         )
 
     def weights_ready(self) -> bool:

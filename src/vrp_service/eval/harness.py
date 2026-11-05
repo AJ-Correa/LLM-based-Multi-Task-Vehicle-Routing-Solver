@@ -249,6 +249,11 @@ def in_process(settings: ServingSettings, backend: str = "mtl") -> tuple[Solve, 
 def _in_process_llm(settings: ServingSettings) -> tuple[Solve, float | None]:
     from vrp_service.serving.solve import solve_llm
 
+    examples = {}
+    if settings.llm_few_shot:
+        from vrp_service.llm.examples import load_examples
+
+        examples = load_examples(settings.llm_few_shot_root, settings.llm_few_shot)
     generate = None
     load_ms = None
     if settings.llm_model_path:
@@ -256,14 +261,19 @@ def _in_process_llm(settings: ServingSettings) -> tuple[Solve, float | None]:
         from vrp_service.llm.generate import load_llm
 
         started = time.perf_counter()
-        llm = load_llm(settings.llm_model_path, max_new_tokens=settings.llm_max_new_tokens)
+        llm = load_llm(
+            settings.llm_model_path,
+            settings.llm_quantization,
+            max_new_tokens=settings.llm_max_new_tokens,
+        )
         load_ms = (time.perf_counter() - started) * 1000
 
         def generate(messages: list[dict[str, str]]):
             return generate_answer(llm, messages)
 
     def solve(request: SolveRequest) -> SolveResponse:
-        return solve_llm(request, generate, settings.llm_model_version)
+        variant_examples = examples.get(request.variant, [])
+        return solve_llm(request, generate, settings.llm_model_version, variant_examples)
 
     return solve, load_ms
 
@@ -341,6 +351,9 @@ def main(argv: list[str] | None = None) -> None:
         solve, load_ms = in_process(settings, args.backend)
         if args.backend == "mtl":
             header["device"] = settings.device
+        else:
+            header["quantization"] = settings.llm_quantization
+            header["few-shot examples"] = settings.llm_few_shot
         if args.backend == "mtl" and settings.device == "cpu":
             header["cpu threads"] = settings.cpu_threads
         header["policy load ms"] = "not loaded" if load_ms is None else f"{load_ms:.0f}"
