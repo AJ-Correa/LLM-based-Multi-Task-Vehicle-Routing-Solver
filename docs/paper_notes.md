@@ -40,10 +40,21 @@ None. An output that does not parse, or a route that breaks a constraint, counts
 infeasible. Repairing it (dropping duplicate visits, inserting missing customers) would put a
 heuristic's work into the model's score.
 
+## Masked decoding is a separate baseline
+
+The base model writes almost no feasible answer: on the full set, 0.1% zero-shot and 0% with
+two examples, mostly because routes overload the vehicle or miss time windows (forcing every
+customer to appear exactly once would have made at most 2 more answers feasible). So each
+row also runs with feasibility-masked decoding, the LLM counterpart of the MTL policy's
+action mask: at each token, only customers that keep the answer feasible can be written.
+It constrains decoding; nothing is changed afterwards, so the no-repair rule holds. The
+masked rows measure how good the model's choices are among feasible ones (cost and gaps);
+the unmasked rows remain the measure of the model alone.
+
 ## How the LLM is measured
 
 The same frozen protocol as `docs/results.md`: 1,600 instances (100 per variant, 100
-customers), the same checker and harness, gaps to the stored PyVRP and OR-Tools routes. Four
-rows, zero-shot, few-shot (solved training examples in the prompt), QLoRA SFT, and QLoRA SFT +
-FOARL, with two extra columns: parse success and an
-error breakdown. The smoke set runs first to measure speed; the full run is decided from that.
+customers), the same checker and harness, gaps to the stored PyVRP and OR-Tools routes. Rows:
+zero-shot, few-shot (solved training examples in the prompt), QLoRA SFT, and QLoRA SFT +
+FOARL, each also with masked decoding, with extra columns: parse success, answers that visit
+every customer exactly once, and an error breakdown. The smoke set runs first to measure speed; the full run is decided from that.

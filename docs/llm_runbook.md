@@ -41,6 +41,7 @@ login node and point `LLM_MODEL_PATH` at the folder.
 | `LLM_QUANTIZATION` | `none` | `none` (bf16), `8bit`, or `4bit` (NF4). Quantization saves memory but decodes more slowly; 4-bit is meant for QLoRA training |
 | `LLM_FEW_SHOT` | `0` | Solved examples per prompt (harness only); 0 is zero-shot. Each adds about 2,450 prompt tokens: mean 2,350 / 4,800 / 7,300 / 9,700 tokens for k = 0 / 1 / 2 / 3 |
 | `LLM_FEW_SHOT_ROOT` | `data/train/n100` | Labelled training set the examples come from: the first k PyVRP-feasible instances of the request's variant |
+| `LLM_MASKED` | `0` | `1` turns on feasibility-masked decoding (harness only), a separate baseline: only customers that keep the answer feasible can be written. See below |
 | `LLM_ADAPTER_PATH` | unset | LoRA adapter folder merged into the bf16 base at load (needs the `train` group). The adapter is trained on a 4-bit base and scored merged |
 
 ## Score it on the smoke set
@@ -101,6 +102,24 @@ sbatch -A <account> -p <gpu partition> scripts/slurm/sft.sbatch \
 - `--limit N` trains on N rows per variant, for a quick check. Checkpoints every 100 steps;
   resubmitting resumes.
 - Score it with `LLM_ADAPTER_PATH=artifacts/llm/adapters/sft-v1` and the eval job script.
+
+## Feasibility-masked decoding (separate baseline)
+
+`LLM_MASKED=1` swaps the schema enforcer for `vrp_service.llm.mask.RouteMask`, the same idea as
+the MTL policy's action mask. At each token only text that keeps the answer a prefix of a
+feasible `{"routes":[[...],...]}` is allowed: a customer only if unvisited and it fits the
+current route (capacity, time window, no linehaul after a backhaul, and, for a closed route, a
+return to the depot within the distance limit and the depot window); a route closes only with
+a customer in it; the answer closes only when every customer is visited. The arithmetic
+mirrors `check_routes`, so every finished answer is feasible; the model still picks the
+order and the route split, which the cost and gaps measure. Truncation is the remaining
+failure. With the Qwen tokenizer, 577 tokens can pass the mask and a step costs about 2 ms
+(CPU), against about 26 ms to generate a token.
+
+```bash
+LLM_MASKED=1 sbatch -A <account> -p <gpu partition> scripts/slurm/eval.sbatch \
+  --backend llm --warmup 1 --out results/llm_zero_shot_masked.jsonl
+```
 
 ## Serve it
 

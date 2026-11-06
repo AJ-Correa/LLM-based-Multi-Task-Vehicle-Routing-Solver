@@ -8,6 +8,7 @@ Imports torch and transformers lazily, so the API image without the ``llm`` grou
 from dataclasses import dataclass
 from typing import Any
 
+from vrp_service.env import EnvironmentInstance
 from vrp_service.llm.parse import ROUTES_SCHEMA
 
 MAX_NEW_TOKENS = 1024
@@ -33,6 +34,8 @@ class LoadedLlm:
     # The enforcer allows runs of whitespace between JSON tokens, and its config is replaced
     # inside the transformers integration, so whitespace tokens are banned here instead.
     whitespace_tokens: frozenset[int]
+    # Every token's text, for the feasibility mask.
+    vocab: tuple[tuple[int, str], ...]
 
 
 def load_llm(
@@ -64,21 +67,23 @@ def load_llm(
 
         model = PeftModel.from_pretrained(model, adapter_path).merge_and_unload()
     model.eval()
-    whitespace = frozenset(
-        token
-        for token in range(len(tokenizer))
-        if any(char.isspace() for char in tokenizer.decode([token]))
-    )
+    vocab = tuple((token, tokenizer.decode([token])) for token in range(len(tokenizer)))
+    whitespace = frozenset(token for token, text in vocab if any(c.isspace() for c in text))
     return LoadedLlm(
         model,
         tokenizer,
         build_token_enforcer_tokenizer_data(tokenizer),
         max_new_tokens,
         whitespace,
+        vocab,
     )
 
 
-def generate(llm: LoadedLlm, messages: list[dict[str, str]]) -> Generation:
+def generate(
+    llm: LoadedLlm, messages: list[dict[str, str]], mask_for: EnvironmentInstance | None = None
+) -> Generation:
+    """``mask_for`` switches to feasibility-masked decoding (``vrp_service.llm.mask``),
+    which replaces the schema enforcer: its grammar is the same JSON, narrowed further."""
     import torch
     from lmformatenforcer import JsonSchemaParser
     from lmformatenforcer.integrations.transformers import (
@@ -89,12 +94,21 @@ def generate(llm: LoadedLlm, messages: list[dict[str, str]]) -> Generation:
     inputs = tokenizer.apply_chat_template(
         messages, add_generation_prompt=True, return_tensors="pt", return_dict=True
     ).to(llm.model.device)
-    schema_tokens = build_transformers_prefix_allowed_tokens_fn(
-        llm.tokenizer_data, JsonSchemaParser(ROUTES_SCHEMA)
-    )
+    prompt_tokens = inputs["input_ids"].shape[1]
+    if mask_for is None:
+        schema_tokens = build_transformers_prefix_allowed_tokens_fn(
+            llm.tokenizer_data, JsonSchemaParser(ROUTES_SCHEMA)
+        )
 
-    def allowed(batch: int, prefix: Any) -> list[int]:
-        return [t for t in schema_tokens(batch, prefix) if t not in llm.whitespace_tokens]
+        def allowed(batch: int, prefix: Any) -> list[int]:
+            return [t for t in schema_tokens(batch, prefix) if t not in llm.whitespace_tokens]
+    else:
+        from vrp_service.llm.mask import RouteMask
+
+        mask = RouteMask(mask_for, llm.vocab, tokenizer.eos_token_id)
+
+        def allowed(batch: int, prefix: Any) -> list[int]:
+            return mask.allowed(tokenizer.decode(prefix[prompt_tokens:]))
 
     with torch.inference_mode():
         output = llm.model.generate(
@@ -108,7 +122,6 @@ def generate(llm: LoadedLlm, messages: list[dict[str, str]]) -> Generation:
                 else tokenizer.eos_token_id
             ),
         )
-    prompt_tokens = inputs["input_ids"].shape[1]
     new = output[0, prompt_tokens:]
     ended = bool((new == tokenizer.eos_token_id).any())
     return Generation(

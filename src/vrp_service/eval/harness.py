@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable, Iterator
+from functools import partial
 from pathlib import Path
 
 from vrp_service.contracts import SolveRequest, SolveResponse
@@ -163,24 +164,29 @@ def markdown(rows: list[dict], header: dict[str, object]) -> str:
 
 
 LLM_ERRORS = ("truncated", "invalid_json", "schema", "generation_failed")
+# Violations meaning some customer is missing, repeated, or not a customer at all.
+COVERAGE_VIOLATIONS = {"not_visited", "visited_twice", "unknown_node"}
 
 
 def outcomes(groups: list[tuple[str, list[dict]]]) -> list[str]:
-    """LLM outcomes: each row is feasible, infeasible, or one error kind."""
+    """LLM outcomes: each row is feasible, infeasible, or one error kind. ``Each customer
+    once`` counts parsed answers that visit every customer exactly once, feasible or not."""
     lines = [
-        "| Variant | n | Parsed | Feasible | Infeasible | "
+        "| Variant | n | Parsed | Each customer once | Feasible | Infeasible | "
         + " | ".join(LLM_ERRORS)
         + " | Other errors | Mean prompt tokens | Mean output tokens |",
-        "| --- " * (8 + len(LLM_ERRORS)) + "|",
+        "| --- " * (9 + len(LLM_ERRORS)) + "|",
     ]
     for name, rows in groups:
         parsed = [row for row in rows if row["status"] == "ok"]
         feasible = sum(row["feasible"] for row in parsed)
+        covered = sum(not COVERAGE_VIOLATIONS & set(row["violations"]) for row in parsed)
         errors = [row["error_type"] for row in rows if row["status"] != "ok"]
         cells = [
             name,
             str(len(rows)),
             f"{len(parsed) / len(rows):.1%}",
+            f"{covered / len(rows):.1%}",
             str(feasible),
             str(len(parsed) - feasible),
             *(str(errors.count(kind)) for kind in LLM_ERRORS),
@@ -269,12 +275,15 @@ def _in_process_llm(settings: ServingSettings) -> tuple[Solve, float | None]:
         )
         load_ms = (time.perf_counter() - started) * 1000
 
-        def generate(messages: list[dict[str, str]]):
-            return generate_answer(llm, messages)
+        def generate(messages: list[dict[str, str]], mask_for=None):
+            return generate_answer(llm, messages, mask_for)
 
     def solve(request: SolveRequest) -> SolveResponse:
         variant_examples = examples.get(request.variant, [])
-        return solve_llm(request, generate, settings.llm_model_version, variant_examples)
+        answer = generate
+        if generate is not None and settings.llm_masked:
+            answer = partial(generate, mask_for=load_instance(request))
+        return solve_llm(request, answer, settings.llm_model_version, variant_examples)
 
     return solve, load_ms
 
@@ -356,6 +365,7 @@ def main(argv: list[str] | None = None) -> None:
             header["quantization"] = settings.llm_quantization
             header["few-shot examples"] = settings.llm_few_shot
             header["adapter"] = settings.llm_adapter_path or "none"
+            header["masked decoding"] = settings.llm_masked
         if args.backend == "mtl" and settings.device == "cpu":
             header["cpu threads"] = settings.cpu_threads
         header["policy load ms"] = "not loaded" if load_ms is None else f"{load_ms:.0f}"

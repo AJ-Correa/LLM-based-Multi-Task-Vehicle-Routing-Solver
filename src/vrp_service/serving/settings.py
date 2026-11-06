@@ -30,6 +30,8 @@ class ServingSettings:
     # A LoRA adapter folder merged into the base at load; needs the `train` group (peft).
     llm_adapter_path: str | None = None
     llm_few_shot_root: str | None = None
+    # Feasibility-masked decoding, a separate baseline. Read by the eval harness.
+    llm_masked: bool = False
 
     @classmethod
     def from_env(cls) -> "ServingSettings":
@@ -50,6 +52,7 @@ class ServingSettings:
             llm_quantization=os.environ.get("LLM_QUANTIZATION") or "none",
             llm_few_shot=int(os.environ.get("LLM_FEW_SHOT") or 0),
             llm_adapter_path=os.environ.get("LLM_ADAPTER_PATH") or None,
+            llm_masked=os.environ.get("LLM_MASKED", "").lower() in ("1", "true"),
             llm_few_shot_root=os.environ.get("LLM_FEW_SHOT_ROOT") or str(root / "data/train/n100"),
         )
 
