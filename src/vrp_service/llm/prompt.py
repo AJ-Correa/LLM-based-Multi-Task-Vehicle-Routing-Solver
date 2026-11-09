@@ -10,6 +10,7 @@ itself reads the same with or without them.
 """
 
 import json
+import math
 from collections.abc import Sequence
 from pathlib import Path
 from string import Template
@@ -17,7 +18,10 @@ from string import Template
 from vrp_service.contracts import TRAINING_VARIANTS, SolveRequest
 from vrp_service.serving.settings import project_root
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
+# v2 adds each node's nearest customers, as LLMCoSolver's prompt does; v1 is kept for the
+# results measured with it.
+NEIGHBOURS = {"v1": 0, "v2": 2}
 SCALE = 1000
 # A solved example: the request and its routes as customer ids, without the depot.
 Example = tuple[SolveRequest, list[list[int]]]
@@ -37,10 +41,13 @@ def render(
     messages = [{"role": "system", "content": system.strip()}]
     for example, routes in examples:
         messages += [
-            {"role": "user", "content": user.substitute(instance=_instance(example)).strip()},
+            {
+                "role": "user",
+                "content": user.substitute(instance=_instance(example, version)).strip(),
+            },
             {"role": "assistant", "content": answer(routes)},
         ]
-    question = user.substitute(instance=_instance(request)).strip()
+    question = user.substitute(instance=_instance(request, version)).strip()
     messages.append({"role": "user", "content": question})
     return messages
 
@@ -62,13 +69,15 @@ def _constraints(request: SolveRequest) -> list[str]:
     return names
 
 
-def _instance(request: SolveRequest) -> str:
+def _instance(request: SolveRequest, version: str = PROMPT_VERSION) -> str:
     instance = request.instance
     flags = TRAINING_VARIANTS[request.variant]
     lines = [f"capacity: {SCALE}"]
     if flags.distance_limit:
         lines.append(f"distance limit: {_int(instance.distance_limit)}")
+    near = NEIGHBOURS[version]
     columns = "id x y demand" + (" open close service" if flags.time_windows else "")
+    columns += "".join(f" n{k} d{k}" for k in range(1, near + 1))
     lines.append(columns)
     for position, node in enumerate(instance.nodes):
         # Pickups are negative; demands are relative to capacity so the capacity is always SCALE.
@@ -79,8 +88,21 @@ def _instance(request: SolveRequest) -> str:
             window = instance.time_windows[position]
             times = [window.start, window.end, instance.service_times[position]]
             row += [_int(value * instance.speed) for value in times]
+        if near:
+            row += _nearest(instance.nodes, position, near)
         lines.append(" ".join(map(str, row)))
     return "\n".join(lines)
+
+
+def _nearest(nodes, position: int, count: int) -> list[int]:
+    """The ``count`` nearest customers to node ``position`` as id, distance pairs."""
+    here = nodes[position]
+    found = sorted(
+        (math.dist((here.x, here.y), (node.x, node.y)), node.id)
+        for other, node in enumerate(nodes)
+        if other not in (0, position)
+    )[:count]
+    return [value for distance, node_id in found for value in (node_id, _int(distance))]
 
 
 def _int(value: float) -> int:

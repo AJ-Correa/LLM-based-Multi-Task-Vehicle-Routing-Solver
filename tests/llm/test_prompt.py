@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from vrp_service.contracts import TRAINING_VARIANTS
@@ -21,11 +23,24 @@ def _rows(user: str) -> list[list[int]]:
     return [[int(value) for value in line.split()] for line in lines[start + 1 :]]
 
 
+@pytest.mark.parametrize("version", ["v1", PROMPT_VERSION])
 @pytest.mark.parametrize("variant", sorted(TRAINING_VARIANTS))
-def test_render_matches_the_snapshot(variant: str) -> None:
+def test_render_matches_the_snapshot(variant: str, version: str) -> None:
     # Regenerate on purpose with a new prompt version, never to make this pass.
-    text = _text(render(read_request(INSTANCE_SET, variant, 0, backend="llm")))
-    assert text == (SNAPSHOTS / f"{PROMPT_VERSION}_{variant}_0.txt").read_text()
+    text = _text(render(read_request(INSTANCE_SET, variant, 0, backend="llm"), version))
+    assert text == (SNAPSHOTS / f"{version}_{variant}_0.txt").read_text()
+
+
+def test_v2_lists_the_two_nearest_customers_with_distances() -> None:
+    request = read_request(INSTANCE_SET, "cvrp", 0)
+    nodes = request.instance.nodes
+    rows = _rows(render(request, "v2")[1]["content"])
+    for position in (0, 5):
+        here = nodes[position]
+        distance = {n.id: math.dist((here.x, here.y), (n.x, n.y)) for n in nodes[1:]}
+        distance.pop(here.id, None)
+        nearest = sorted(distance, key=distance.get)[:2]
+        assert rows[position][4:] == [v for n in nearest for v in (n, round(distance[n] * SCALE))]
 
 
 def test_cvrp_prompt_has_only_the_base_constraints() -> None:

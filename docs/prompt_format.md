@@ -4,6 +4,13 @@ The `llm` backend renders each solve request as two chat messages from
 `configs/prompts/<version>/` (`src/vrp_service/llm/prompt.py`). This page records why the
 instance is written as integers and what that saves.
 
+## Prompt `v2`
+
+The same as `v1` below, plus four columns at the end of every row: the node's two nearest
+customers and their distances (`n1 d1 n2 d2`), following LLMCoSolver. It costs about 1,250
+more tokens per prompt (mean 3,600, max 4,377 on the eval set) and is the default from
+`sft-v2` on. The base-model rows and `sft-v1` were measured with `v1`.
+
 ## Format (prompt `v1`)
 
 The system message names the variant and lists only the rules the variant has, worded to

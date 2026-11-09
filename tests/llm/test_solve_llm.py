@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from vrp_service.eval import load_instance_set, read_request, read_solution
 from vrp_service.eval.harness import evaluate
+from vrp_service.llm import PROMPT_VERSION
 from vrp_service.llm.generate import Generation
 from vrp_service.serving.app import create_app
 from vrp_service.serving.settings import ServingSettings, project_root
@@ -32,7 +33,7 @@ def _stub(text: str, hit_limit: bool = False):
 def test_a_feasible_answer_returns_routes_cost_and_tokens() -> None:
     response = solve_llm(_request(), _stub(_solver_answer()))
     assert response.status == "ok" and response.feasible
-    assert response.model_version == "llm/v0.1.0" and response.prompt_version == "v1"
+    assert response.model_version == "llm/v0.1.0" and response.prompt_version == PROMPT_VERSION
     assert all(route.node_ids[0] == 0 and route.node_ids[-1] == 0 for route in response.routes)
     assert response.objective_value > 0
     assert response.debug == {
@@ -59,7 +60,7 @@ def test_an_unparseable_answer_is_an_error_with_its_kind_and_tokens() -> None:
     response = solve_llm(_request(), _stub('{"routes": [["1"]]}'))
     assert (response.status, response.error_type) == ("error", "schema")
     assert response.routes == [] and response.debug["completion_tokens"] == 300
-    assert response.prompt_version == "v1"
+    assert response.prompt_version == PROMPT_VERSION
 
 
 def test_hitting_the_token_limit_counts_as_truncated() -> None:
@@ -101,7 +102,9 @@ def test_missing_model_wrong_backend_and_generation_failure() -> None:
             raise error
 
         response = solve_llm(_request(), broken)
-        assert response.error_type == "generation_failed" and response.prompt_version == "v1"
+        assert (
+            response.error_type == "generation_failed" and response.prompt_version == PROMPT_VERSION
+        )
 
 
 def test_post_solve_routes_llm_requests_to_the_llm(monkeypatch) -> None:

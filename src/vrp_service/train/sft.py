@@ -42,7 +42,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--grad-accum", type=int, default=4)
-    parser.add_argument("--max-length", type=int, default=4096)
+    # Prompt v2 is at most 4,377 tokens on the eval set; plus a ~350-token answer.
+    parser.add_argument("--max-length", type=int, default=5120)
     parser.add_argument("--holdout", type=int, default=10)
     parser.add_argument("--limit", type=int, help="first N training rows per variant (smoke)")
     parser.add_argument("--no-quantize", action="store_true", help="CPU smoke runs only")
@@ -82,7 +83,7 @@ def main(argv: list[str] | None = None) -> None:
         bf16=gpu,
         gradient_checkpointing=gpu,
         eval_strategy="steps",
-        eval_steps=50,
+        eval_steps=200,
         logging_steps=10,
         save_strategy="steps",
         save_steps=100,

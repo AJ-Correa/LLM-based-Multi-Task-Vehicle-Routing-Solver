@@ -66,6 +66,13 @@ sbatch -A <account> -p <gpu partition> scripts/slurm/eval.sbatch \
 
 GPU memory is sampled every 30 s into `slurm-<job>.gpu.csv`.
 
+## Prompt v2: nearest customers
+
+From `sft-v2` on, prompts are `v2`: each node's row ends with its two nearest customers and
+their distances (`n1 d1 n2 d2`), as LLMCoSolver's prompt does. Prompt tokens: mean 3,600 and
+max 4,377 on the eval set, against 2,347 / 3,114 for v1. The base-model rows and `sft-v1` were
+measured with v1; `configs/prompts/v1` and its snapshots stay for those results.
+
 ## Training data and few-shot examples
 
 Few-shot examples and the later SFT data come from generated instances, labelled by PyVRP.
@@ -98,7 +105,8 @@ sbatch -A <account> -p <gpu partition> scripts/slurm/sft.sbatch \
   the answer only. The last 10 feasible instances of each variant are held out for eval loss.
 - 4-bit NF4 base (double quantization), LoRA rank 64, alpha 64, dropout 0.05, on every
   attention and MLP projection. Defaults: 1 epoch, learning rate 2e-4 (cosine, 3% warm-up),
-  batch 4 × 4 accumulation steps, sequences up to 4,096 tokens.
+  batch 4 × 4 accumulation steps, sequences up to 5,120 tokens (prompt v2). Eval loss every
+  200 steps.
 - `--limit N` trains on N rows per variant, for a quick check. Checkpoints every 100 steps;
   resubmitting resumes.
 - Score it with `LLM_ADAPTER_PATH=artifacts/llm/adapters/sft-v1` and the eval job script.

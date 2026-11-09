@@ -1,0 +1,1 @@
+- A positive demand is a delivery, a negative demand a pickup. On each route all deliveries come before any pickup. Total deliveries and total pickups on a route must each stay within the capacity.
