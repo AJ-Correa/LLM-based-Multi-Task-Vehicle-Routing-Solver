@@ -34,6 +34,22 @@ mtl = [
     "tensordict>=0.6",
     "torchrl>=0.6",
 ]
+# The local LLM backend; torch comes from the `gpu` extra.
+llm = [
+    "accelerate>=1.0",
+    "bitsandbytes>=0.44",
+    "lm-format-enforcer>=0.10",
+    # lm-format-enforcer 0.11 imports transformers 4.x internals.
+    "transformers>=4.46,<5",
+]
+data = [
+    "pyvrp>=0.11",
+]
+train = [
+    "datasets>=3",
+    "peft>=0.15",
+    "trl>=0.20",
+]
 
 # Pick one torch build: `cpu` for the API image, `gpu` (the PyPI CUDA wheel) for local runs.
 [project.optional-dependencies]

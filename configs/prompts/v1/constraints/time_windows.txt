@@ -1,0 +1,1 @@
+- Vehicles leave the depot at time 0 and travel time equals distance. Arrive at each customer no later than its close time; arriving before its open time means waiting until open. Service takes the service time.

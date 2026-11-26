@@ -3,6 +3,7 @@
     python -m vrp_service.eval.harness --out results/mtl.jsonl
     python -m vrp_service.eval.harness --smoke --out results/smoke.jsonl
     python -m vrp_service.eval.harness --mode http --url http://localhost:8000 --out ...
+    python -m vrp_service.eval.harness --report results/llm_smoke.jsonl
 
 ``latency_ms`` is the solve clock inside ``solve_mtl``: decode, route split, and the
 feasibility check. ``wall_ms`` is what the harness waits for one solve: the same call
@@ -12,19 +13,19 @@ Warm-up solves run first and are not recorded.
 
 import argparse
 import json
-import math
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable, Iterator
+from functools import partial
 from pathlib import Path
 
 from vrp_service.contracts import SolveRequest, SolveResponse
 from vrp_service.env import (
     SOLVER_ROUNDING_TOLERANCE,
-    EnvironmentInstance,
     check_routes,
     load_instance,
+    route_length,
 )
 from vrp_service.eval.instance_set import (
     InstanceSet,
@@ -57,13 +58,15 @@ def evaluate(
     items: Iterable[tuple[str, int]],
     solve: Solve,
     warmup: int = 0,
+    backend: str = "mtl",
 ) -> Iterator[dict]:
     """Yield one row per item as it finishes, so a long run keeps what it has done."""
     items = list(items)
     for number in range(warmup if items else 0):
-        _solve_safely(solve, read_request(instance_set, *items[number % len(items)]))
+        variant, index = items[number % len(items)]
+        _solve_safely(solve, read_request(instance_set, variant, index, backend))
     for variant, index in items:
-        request = read_request(instance_set, variant, index)
+        request = read_request(instance_set, variant, index, backend)
         started = time.perf_counter()
         response = _solve_safely(solve, request)
         wall_ms = (time.perf_counter() - started) * 1000
@@ -111,6 +114,8 @@ def score(
         "routes": routes,
         "latency_ms": response.latency_ms,
         "wall_ms": wall_ms,
+        "prompt_tokens": response.debug.get("prompt_tokens"),
+        "completion_tokens": response.debug.get("completion_tokens"),
     }
 
 
@@ -138,16 +143,6 @@ def gaps(
     return result
 
 
-def route_length(instance: EnvironmentInstance, routes: list[list[int]]) -> float:
-    """Euclidean length in float64; routes already omit an open route's return leg."""
-    index = {node: position for position, node in enumerate(instance.node_ids)}
-    return sum(
-        math.dist(instance.locs[index[a]], instance.locs[index[b]])
-        for route in routes
-        for a, b in zip(route, route[1:])
-    )
-
-
 def markdown(rows: list[dict], header: dict[str, object]) -> str:
     """Cost and gaps average feasible rows only; latency covers rows that returned routes."""
     lines = [f"- {key}: {value}" for key, value in header.items()]
@@ -163,7 +158,48 @@ def markdown(rows: list[dict], header: dict[str, object]) -> str:
         groups.append(("all", rows))
     for name, group in groups:
         lines.append(_table_row(name, group))
+    if any(row.get("prompt_tokens") is not None for row in rows):
+        lines += ["", *outcomes(groups)]
     return "\n".join(lines) + "\n"
+
+
+LLM_ERRORS = ("truncated", "invalid_json", "schema", "generation_failed")
+# Violations meaning some customer is missing, repeated, or not a customer at all.
+COVERAGE_VIOLATIONS = {"not_visited", "visited_twice", "unknown_node"}
+
+
+def outcomes(groups: list[tuple[str, list[dict]]]) -> list[str]:
+    """LLM outcomes: each row is feasible, infeasible, or one error kind. ``Each customer
+    once`` counts parsed answers that visit every customer exactly once, feasible or not."""
+    lines = [
+        "| Variant | n | Parsed | Each customer once | Feasible | Infeasible | "
+        + " | ".join(LLM_ERRORS)
+        + " | Other errors | Mean prompt tokens | Mean output tokens |",
+        "| --- " * (9 + len(LLM_ERRORS)) + "|",
+    ]
+    for name, rows in groups:
+        parsed = [row for row in rows if row["status"] == "ok"]
+        feasible = sum(row["feasible"] for row in parsed)
+        covered = sum(not COVERAGE_VIOLATIONS & set(row["violations"]) for row in parsed)
+        errors = [row["error_type"] for row in rows if row["status"] != "ok"]
+        cells = [
+            name,
+            str(len(rows)),
+            f"{len(parsed) / len(rows):.1%}",
+            f"{covered / len(rows):.1%}",
+            str(feasible),
+            str(len(parsed) - feasible),
+            *(str(errors.count(kind)) for kind in LLM_ERRORS),
+            str(sum(kind not in LLM_ERRORS for kind in errors)),
+            *(_mean_tokens(rows, key) for key in ("prompt_tokens", "completion_tokens")),
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
+def _mean_tokens(rows: list[dict], key: str) -> str:
+    values = [row[key] for row in rows if row.get(key) is not None]
+    return f"{sum(values) / len(values):,.0f}" if values else "-"
 
 
 def _table_row(name: str, rows: list[dict]) -> str:
@@ -193,8 +229,10 @@ def _ms(values: list[float], q: float) -> str:
     return f"{percentile(values, q):.1f}" if values else "-"
 
 
-def in_process(settings: ServingSettings) -> tuple[Solve, float | None]:
-    """A solver that calls the policy directly, and the load time when it loaded."""
+def in_process(settings: ServingSettings, backend: str = "mtl") -> tuple[Solve, float | None]:
+    """A solver that calls the model directly, and the load time when it loaded."""
+    if backend == "llm":
+        return _in_process_llm(settings)
     from vrp_service.serving.solve import solve_mtl
 
     policy = None
@@ -210,6 +248,42 @@ def in_process(settings: ServingSettings) -> tuple[Solve, float | None]:
 
     def solve(request: SolveRequest) -> SolveResponse:
         return solve_mtl(request, policy, settings.model_version)
+
+    return solve, load_ms
+
+
+def _in_process_llm(settings: ServingSettings) -> tuple[Solve, float | None]:
+    from vrp_service.serving.solve import solve_llm
+
+    examples = {}
+    if settings.llm_few_shot:
+        from vrp_service.llm.examples import load_examples
+
+        examples = load_examples(settings.llm_few_shot_root, settings.llm_few_shot)
+    generate = None
+    load_ms = None
+    if settings.llm_model_path:
+        from vrp_service.llm.generate import generate as generate_answer
+        from vrp_service.llm.generate import load_llm
+
+        started = time.perf_counter()
+        llm = load_llm(
+            settings.llm_model_path,
+            settings.llm_quantization,
+            max_new_tokens=settings.llm_max_new_tokens,
+            adapter_path=settings.llm_adapter_path,
+        )
+        load_ms = (time.perf_counter() - started) * 1000
+
+        def generate(messages: list[dict[str, str]], mask_for=None):
+            return generate_answer(llm, messages, mask_for)
+
+    def solve(request: SolveRequest) -> SolveResponse:
+        variant_examples = examples.get(request.variant, [])
+        answer = generate
+        if generate is not None and settings.llm_masked:
+            answer = partial(generate, mask_for=load_instance(request))
+        return solve_llm(request, answer, settings.llm_model_version, variant_examples)
 
     return solve, load_ms
 
@@ -251,13 +325,21 @@ def main(argv: list[str] | None = None) -> None:
     """Exit 1 when no instance was solved, for example when the policy is missing."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", default=DEFAULT_CONFIG)
-    parser.add_argument("--out", required=True, help="JSONL path; the table goes next to it as .md")
+    parser.add_argument("--out", help="JSONL path; the table goes next to it as .md")
+    parser.add_argument("--report", metavar="JSONL", help="print the tables of an earlier run")
     parser.add_argument("--mode", choices=["inprocess", "http"], default="inprocess")
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--smoke", action="store_true", help="only the two CI smoke instances")
     parser.add_argument("--limit", type=int, help="first N instances per variant")
     parser.add_argument("--warmup", type=int, default=5)
+    parser.add_argument("--backend", choices=["mtl", "llm"], default="mtl")
     args = parser.parse_args(argv)
+    if args.report:
+        rows = [json.loads(line) for line in Path(args.report).read_text().splitlines() if line]
+        print(markdown(rows, {"report of": args.report}), end="")
+        return
+    if not args.out:
+        parser.error("--out is required unless --report is given")
 
     root = project_root()
     instance_set = load_instance_set(root / args.config, root)
@@ -265,16 +347,26 @@ def main(argv: list[str] | None = None) -> None:
         items = select(instance_set, args.smoke, args.limit)
     except ValueError as error:
         parser.error(str(error))
-    header: dict[str, object] = {"instance set": instance_set.name, "mode": args.mode}
+    header: dict[str, object] = {
+        "instance set": instance_set.name,
+        "backend": args.backend,
+        "mode": args.mode,
+    }
     if args.mode == "http":
         solve = over_http(args.url)
         header["url"] = args.url
         header["server ready"] = server_ready(args.url)
     else:
         settings = ServingSettings.from_env()
-        solve, load_ms = in_process(settings)
-        header["device"] = settings.device
-        if settings.device == "cpu":
+        solve, load_ms = in_process(settings, args.backend)
+        if args.backend == "mtl":
+            header["device"] = settings.device
+        else:
+            header["quantization"] = settings.llm_quantization
+            header["few-shot examples"] = settings.llm_few_shot
+            header["adapter"] = settings.llm_adapter_path or "none"
+            header["masked decoding"] = settings.llm_masked
+        if args.backend == "mtl" and settings.device == "cpu":
             header["cpu threads"] = settings.cpu_threads
         header["policy load ms"] = "not loaded" if load_ms is None else f"{load_ms:.0f}"
     header["warm-up solves"] = args.warmup
@@ -283,7 +375,7 @@ def main(argv: list[str] | None = None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     with out.open("w") as handle:
-        for row in evaluate(instance_set, items, solve, args.warmup):
+        for row in evaluate(instance_set, items, solve, args.warmup, args.backend):
             handle.write(json.dumps(row) + "\n")
             handle.flush()
             rows.append(row)

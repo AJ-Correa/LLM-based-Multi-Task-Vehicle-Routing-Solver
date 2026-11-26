@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MODEL_VERSION = "mtl/v0.1.0"
+LLM_MODEL_VERSION = "llm/v0.1.0"
 
 
 def project_root() -> Path:
@@ -19,6 +20,18 @@ class ServingSettings:
     device: str = "cpu"
     cpu_threads: int = 4
     manifests_root: str | None = None
+    # A local folder or a cached Hub id; unset keeps the LLM backend off.
+    llm_model_path: str | None = None
+    llm_model_version: str = LLM_MODEL_VERSION
+    llm_max_new_tokens: int = 1024
+    llm_quantization: str = "none"
+    # Solved training examples per prompt; 0 is zero-shot. Read by the eval harness.
+    llm_few_shot: int = 0
+    # A LoRA adapter folder merged into the base at load; needs the `train` group (peft).
+    llm_adapter_path: str | None = None
+    llm_few_shot_root: str | None = None
+    # Feasibility-masked decoding, a separate baseline. Read by the eval harness.
+    llm_masked: bool = False
 
     @classmethod
     def from_env(cls) -> "ServingSettings":
@@ -33,6 +46,14 @@ class ServingSettings:
             cpu_threads=int(os.environ.get("MTL_CPU_THREADS") or 4),
             manifests_root=os.environ.get("MODEL_MANIFESTS")
             or str(root / "artifacts" / "manifests"),
+            llm_model_path=os.environ.get("LLM_MODEL_PATH") or None,
+            llm_model_version=os.environ.get("LLM_MODEL_VERSION") or LLM_MODEL_VERSION,
+            llm_max_new_tokens=int(os.environ.get("LLM_MAX_NEW_TOKENS") or 1024),
+            llm_quantization=os.environ.get("LLM_QUANTIZATION") or "none",
+            llm_few_shot=int(os.environ.get("LLM_FEW_SHOT") or 0),
+            llm_adapter_path=os.environ.get("LLM_ADAPTER_PATH") or None,
+            llm_masked=os.environ.get("LLM_MASKED", "").lower() in ("1", "true"),
+            llm_few_shot_root=os.environ.get("LLM_FEW_SHOT_ROOT") or str(root / "data/train/n100"),
         )
 
     def weights_ready(self) -> bool:

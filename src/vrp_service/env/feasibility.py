@@ -115,3 +115,13 @@ def _check_route(
     if length > instance.distance_limit + tolerance:
         violations.append(Violation("distance_limit", number))
     return violations
+
+
+def route_length(instance: EnvironmentInstance, routes: list[list[int]]) -> float:
+    """Euclidean length in float64; routes already omit an open route's return leg."""
+    index = {node: position for position, node in enumerate(instance.node_ids)}
+    return sum(
+        math.dist(instance.locs[index[a]], instance.locs[index[b]])
+        for route in routes
+        for a, b in zip(route, route[1:])
+    )

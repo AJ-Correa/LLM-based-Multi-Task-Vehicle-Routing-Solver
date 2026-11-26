@@ -1,6 +1,11 @@
 """Single-depot multi-task routing environment."""
 
-from vrp_service.env.feasibility import SOLVER_ROUNDING_TOLERANCE, Violation, check_routes
+from vrp_service.env.feasibility import (
+    SOLVER_ROUNDING_TOLERANCE,
+    Violation,
+    check_routes,
+    route_length,
+)
 from vrp_service.env.instance import EnvironmentInstance, load_instance
 
 __all__ = [
@@ -9,4 +14,5 @@ __all__ = [
     "Violation",
     "check_routes",
     "load_instance",
+    "route_length",
 ]

@@ -1,20 +1,25 @@
 """Turn one solve request into the shared response.
 
-``backend=mtl`` decodes with the supplied policy, and ``feasible`` comes from the
-route checker. Any other backend, or a missing policy, stays on the same
-response schema with ``feasible`` false.
+``backend=mtl`` decodes with the supplied policy; ``backend=llm`` renders the prompt,
+generates, and parses the answer with no repair. ``feasible`` comes from the route
+checker in both. A wrong backend, or a missing model, stays on the same response
+schema with ``feasible`` false.
 """
 
 import time
 from collections.abc import Callable, Sequence
 
 from vrp_service.contracts import Route, SolveRequest, SolveResponse
-from vrp_service.env import EnvironmentInstance, check_routes, load_instance
+from vrp_service.env import EnvironmentInstance, check_routes, load_instance, route_length
+from vrp_service.llm.generate import Generation
+from vrp_service.llm.parse import ParsedRoutes, ParseError, parse_routes
+from vrp_service.llm.prompt import PROMPT_VERSION, Example, render
 from vrp_service.mtl.decode import decode_request
 from vrp_service.observability.tracing import tracer
-from vrp_service.serving.settings import MODEL_VERSION
+from vrp_service.serving.settings import LLM_MODEL_VERSION, MODEL_VERSION
 
 Policy = Callable[[EnvironmentInstance], dict]
+Generate = Callable[[list[dict[str, str]]], Generation]
 
 CVRP_EXAMPLE = {
     "contract_version": "1.0.0",
@@ -57,6 +62,23 @@ def solve_mtl(
     policy: Policy | None,
     model_version: str = MODEL_VERSION,
 ) -> SolveResponse:
+    return _traced(request, model_version, lambda: _solve(request, policy, model_version))
+
+
+def solve_llm(
+    request: SolveRequest,
+    generate: Generate | None,
+    model_version: str = LLM_MODEL_VERSION,
+    examples: Sequence[Example] = (),
+) -> SolveResponse:
+    return _traced(
+        request, model_version, lambda: _solve_llm(request, generate, model_version, examples)
+    )
+
+
+def _traced(
+    request: SolveRequest, model_version: str, run: Callable[[], SolveResponse]
+) -> SolveResponse:
     attributes = {
         "vrp.backend": request.backend,
         "vrp.variant": request.variant,
@@ -64,7 +86,7 @@ def solve_mtl(
         "vrp.model_version": model_version,
     }
     with tracer.start_as_current_span("solve", attributes=attributes) as span:
-        response = _solve(request, policy, model_version)
+        response = run()
         span.set_attribute("vrp.status", response.status)
         span.set_attribute("vrp.feasible", response.feasible)
         span.set_attribute("vrp.vehicles", len(response.routes))
@@ -102,20 +124,81 @@ def _solve(request: SolveRequest, policy: Policy | None, model_version: str) -> 
     )
 
 
+def _solve_llm(
+    request: SolveRequest,
+    generate: Generate | None,
+    model_version: str,
+    examples: Sequence[Example] = (),
+) -> SolveResponse:
+    started = time.perf_counter()
+    if request.backend != "llm":
+        return _error(request, model_version, "unsupported_backend", started)
+    if generate is None:
+        return _error(request, model_version, "model_unavailable", started)
+    with tracer.start_as_current_span("render"):
+        messages = render(request, examples=examples)
+    try:
+        with tracer.start_as_current_span("generate") as span:
+            generation = generate(messages)
+            span.set_attribute("llm.prompt_tokens", generation.prompt_tokens)
+            span.set_attribute("llm.completion_tokens", generation.completion_tokens)
+    except Exception:  # noqa: BLE001 - any failure inside the model stack is one outcome
+        return _error(request, model_version, "generation_failed", started)
+    # Token counts ride on every LLM response, failed or not: the cost table needs them.
+    debug = {
+        "prompt_tokens": generation.prompt_tokens,
+        "completion_tokens": generation.completion_tokens,
+        "hit_token_limit": generation.hit_limit,
+        "few_shot": len(examples),
+    }
+    if request.options.return_debug:
+        debug["raw_output"] = generation.text
+    try:
+        with tracer.start_as_current_span("parse_and_check") as span:
+            parsed = parse_routes(generation.text, request)
+            span.set_attribute("vrp.violations", sorted({v.kind for v in parsed.violations}))
+    except ParseError as error:
+        kind = "truncated" if generation.hit_limit else error.kind
+        return _error(request, model_version, kind, started, debug)
+    return SolveResponse(
+        backend=request.backend,
+        model_version=model_version,
+        prompt_version=PROMPT_VERSION,
+        feasible=not parsed.violations,
+        objective_value=_llm_cost(request, parsed),
+        routes=[
+            Route(vehicle_id=number, node_ids=route) for number, route in enumerate(parsed.routes)
+        ],
+        latency_ms=_latency(started),
+        status="ok",
+        debug=debug,
+    )
+
+
+def _llm_cost(request: SolveRequest, parsed: ParsedRoutes) -> float | None:
+    """No length for a route through a node that does not exist."""
+    if any(violation.kind == "unknown_node" for violation in parsed.violations):
+        return None
+    return route_length(load_instance(request), parsed.routes)
+
+
 def _error(
     request: SolveRequest,
     model_version: str,
     error_type: str,
     started: float,
+    debug: dict | None = None,
 ) -> SolveResponse:
     return SolveResponse(
         backend=request.backend,
         model_version=model_version,
+        prompt_version=PROMPT_VERSION if request.backend == "llm" else None,
         feasible=False,
         routes=[],
         latency_ms=_latency(started),
         status="error",
         error_type=error_type,
+        debug=debug or {},
     )
 
 

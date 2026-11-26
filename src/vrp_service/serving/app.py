@@ -1,13 +1,15 @@
 """HTTP application for LLM-based VRP decision support.
 
 When the checkpoint is present, startup loads the policy once so no request pays
-for the load. Each solve writes one JSON line to stdout.
+for the load; with ``LLM_MODEL_PATH`` set it also loads the LLM. Each solve writes
+one JSON line to stdout.
 """
 
 import json
 import logging
 import sys
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -17,12 +19,13 @@ from pydantic import BaseModel
 
 from vrp_service import __version__
 from vrp_service.contracts import SolveRequest, SolveResponse
+from vrp_service.llm.generate import generate as generate_answer
 from vrp_service.mtl.decode import load_policy
 from vrp_service.observability.metrics import MODEL_INFO, POLICY_LOADED, record_solve
 from vrp_service.observability.tracing import configure_tracing
 from vrp_service.registry import ModelEntry, Registry, load_registry
 from vrp_service.serving.settings import ServingSettings
-from vrp_service.serving.solve import CVRP_EXAMPLE, solve_mtl
+from vrp_service.serving.solve import CVRP_EXAMPLE, solve_llm, solve_mtl
 
 app_title = "LLM-based VRP decision support"
 solve_log = logging.getLogger("vrp_service.solve")
@@ -52,14 +55,19 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         _policy(application, settings)
+        _llm(application, settings)
         yield
 
     application = FastAPI(title=app_title, version=__version__, lifespan=lifespan)
     application.state.settings = settings
     application.state.policy = None
+    application.state.llm = None
+    application.state.llm_failed = False
     application.state.registry = None
     MODEL_INFO.clear()
     MODEL_INFO.labels(settings.model_version).set(1)
+    if settings.llm_model_path:
+        MODEL_INFO.labels(settings.llm_model_version).set(1)
 
     @application.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -76,7 +84,12 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
             Body(openapi_examples={"cvrp": {"summary": "One customer", "value": CVRP_EXAMPLE}}),
         ],
     ) -> SolveResponse:
-        response = solve_mtl(request, _policy(application, settings), settings.model_version)
+        if request.backend == "llm":
+            llm = _llm(application, settings)
+            generate = partial(generate_answer, llm) if llm is not None else None
+            response = solve_llm(request, generate, settings.llm_model_version)
+        else:
+            response = solve_mtl(request, _policy(application, settings), settings.model_version)
         _log_solve(request, response)
         record_solve(request, response)
         return response
@@ -151,6 +164,28 @@ def _policy(application: FastAPI, settings: ServingSettings):
         settings.cpu_threads,
     )
     return application.state.policy
+
+
+def _llm(application: FastAPI, settings: ServingSettings):
+    """A failed load leaves the LLM off for this process instead of stopping the MTL backend."""
+    if (
+        application.state.llm is None
+        and settings.llm_model_path
+        and not application.state.llm_failed
+    ):
+        from vrp_service.llm.generate import load_llm
+
+        try:
+            application.state.llm = load_llm(
+                settings.llm_model_path,
+                settings.llm_quantization,
+                max_new_tokens=settings.llm_max_new_tokens,
+                adapter_path=settings.llm_adapter_path,
+            )
+        except Exception as error:  # noqa: BLE001
+            application.state.llm_failed = True
+            logging.getLogger(__name__).error("LLM load failed: %r", error)
+    return application.state.llm
 
 
 app = create_app()
