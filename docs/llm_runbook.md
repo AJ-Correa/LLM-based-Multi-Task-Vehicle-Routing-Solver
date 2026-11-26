@@ -185,3 +185,29 @@ Same GPU and smoke set, `LLM_QUANTIZATION=none`.
 - Load: about 105 s, of which importing torch and transformers from the cluster's shared
   filesystem is about 70–85 s and the weights 8–29 s. Once per job, so left as is.
 - Full set at this speed: about 3.6 hours.
+
+### Full eval set, 2026-11-11
+
+Deucalion, one A100-SXM4-40GB per run, bf16, 1,600 instances (100 per variant, 100
+customers). sft-v1: 500 instances per variant, prompt v1. sft-v2: 5,000 per variant, prompt
+v2 (nearest customers). Gaps are over feasible answers only; "Each once" is the share of
+answers that visit every customer exactly once.
+
+| Row | Prompt | Feasible | Each once | Gap PyVRP | Gap OR-Tools | Prompt / output tokens | p50 s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Zero-shot | v1 | 0.1% (1) | 53.6% | +441.1% | +426.8% | 2,346 / 336 | 8.0 |
+| Few-shot (k=2) | v1 | 0.0% | 26.2% | – | – | 7,263 / 330 | 8.2 |
+| Zero-shot + masked | v1 | 100% | 100% | +241.5% | +233.0% | 2,346 / 299 | 7.9 |
+| Few-shot + masked | v1 | 100% | 100% | +236.0% | +227.6% | 7,263 / 298 | 8.2 |
+| LoRA sft-v1 | v1 | 0.0% | 0.6% | – | – | 2,346 / 298 | 8.0 |
+| LoRA sft-v1 + masked | v1 | 100% | 100% | +51.9% | +48.3% | 2,346 / 298 | 7.5 |
+| LoRA sft-v2 | v2 | 0.4% (7) | 11.2% | +11.3% | +8.4% | 3,600 / 314 | 8.2 |
+| LoRA sft-v2 + masked | v2 | 100% | 100% | +24.1% | +21.2% | 3,600 / 298 | 7.5 |
+| MTL policy (reference) | – | 100% | 100% | +2.9% | +0.5% | – | 0.55 |
+
+- sft-v2 + masked by family: plain and open/backhaul/limit variants +25–37%, time-window
+  variants +15–22% (the window prunes most wrong choices).
+- Unmasked sft-v2 is still nearly always infeasible: capacity and time windows, not coverage,
+  break most answers. The seven feasible answers are within about 11% of PyVRP.
+- sft-v1 → sft-v2 changed the data size and the prompt together, so the gain is not split
+  between them.

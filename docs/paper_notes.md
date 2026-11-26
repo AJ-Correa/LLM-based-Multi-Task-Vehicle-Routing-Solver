@@ -55,6 +55,16 @@ the unmasked rows remain the measure of the model alone.
 
 The same frozen protocol as `docs/results.md`: 1,600 instances (100 per variant, 100
 customers), the same checker and harness, gaps to the stored PyVRP and OR-Tools routes. Rows:
-zero-shot, few-shot (solved training examples in the prompt), QLoRA SFT, and QLoRA SFT +
+zero-shot, few-shot (solved training examples in the prompt), QLoRA SFT (QLoRA SFT +
 FOARL, each also with masked decoding, with extra columns: parse success, answers that visit
 every customer exactly once, and an error breakdown. The smoke set runs first to measure speed; the full run is decided from that.
+
+## Results
+
+Full table: `docs/llm_runbook.md`, "Full eval set". Fine-tuning is the gain that matters:
+with masked decoding, the gap to PyVRP falls from +241.5% (base, zero-shot) to +51.9%
+(sft-v1, 500 instances per variant) and +24.1% (sft-v2, 5,000 per variant with the
+nearest-customer hints). Unmasked, the fine-tuned model writes a feasible answer 0.4% of the
+time, against 59% for the paper's CVRP-only SFT; the paper trains one problem on 500,000
+instances, this project 16 variants on 80,000 with one adapter. FOARL was not run, and the
+MTL policy (+2.9%) stays far ahead, as expected.
