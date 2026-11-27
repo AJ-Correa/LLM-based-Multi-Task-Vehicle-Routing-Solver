@@ -2,13 +2,39 @@
 
 [![ci](https://github.com/AJ-Correa/LLM-based-Multi-Task-Vehicle-Routing-Solver/actions/workflows/ci.yml/badge.svg)](https://github.com/AJ-Correa/LLM-based-Multi-Task-Vehicle-Routing-Solver/actions/workflows/ci.yml)
 
-A FastAPI service that solves vehicle routing problems behind one HTTP contract. The `mtl`
-backend runs a multi-task neural routing policy that covers 16 single-depot variants with one
-model. A local LLM backend (Qwen2.5-7B-Instruct, before and after LoRA fine-tuning) will share
-the same request and response shapes.
+A FastAPI service that solves vehicle routing problems behind one HTTP contract, with two
+backends scored on the same frozen benchmark:
 
-**Status:** `POST /solve` works for `backend=mtl`. The LLM backend is in progress; it is an
-engineering demo inspired by LLMCoSolver, scoped in [`docs/paper_notes.md`](docs/paper_notes.md).
+- **`mtl`**: a multi-task neural routing policy that covers 16 single-depot variants with one
+  model. 100% feasible, +2.9% to PyVRP, about 0.55 s per 100-customer instance.
+- **`llm`**: Qwen2.5-7B-Instruct, scored before and after QLoRA fine-tuning, with and without
+  feasibility-masked decoding. An engineering study inspired by LLMCoSolver, scoped in
+  [`docs/paper_notes.md`](docs/paper_notes.md).
+
+## Results
+
+1,600 instances (16 variants × 100, 100 customers each). Gaps are averaged over feasible
+answers against PyVRP run for 20 s per instance. LLM outputs are never repaired.
+
+| Backend | Feasible | Gap to PyVRP | Time per solve |
+| --- | --- | --- | --- |
+| MTL policy | 100% | +2.9% | 0.55 s |
+| Qwen2.5-7B zero-shot | 0.1% | – | 8.0 s |
+| Qwen2.5-7B zero-shot + masked decoding | 100% | +241.5% | 7.9 s |
+| Qwen2.5-7B QLoRA SFT (80k instances) | 0.4% | +11.3% (7 answers) | 8.2 s |
+| Qwen2.5-7B QLoRA SFT + masked decoding | 100% | +24.1% | 7.5 s |
+
+- Fine-tuning cuts the masked gap from +241.5% to +24.1%, ten times smaller. Going from 500
+  to 5,000 training instances per variant, with nearest-customer hints in the prompt, halved
+  it from +51.9%.
+- Unmasked, the model almost never writes a feasible plan: capacity and time windows break
+  most answers. Masked decoding (an action mask over tokens, not a repair step) makes every
+  answer feasible and isolates how good the model's routing choices are.
+- A small specialised policy stays about 21 points closer to PyVRP and 14 times faster than the 7B LLM.
+
+Every row, per-variant tables, and the error breakdown are in
+[`docs/results.md`](docs/results.md) (MTL) and [`docs/llm_runbook.md`](docs/llm_runbook.md)
+(LLM).
 
 ## Variants
 
@@ -165,6 +191,14 @@ With torch and the checkpoint installed, the same tests also check the stored ro
 ```bash
 uv run --group mtl --extra gpu pytest -q
 ```
+
+## LLM backend
+
+Set `LLM_MODEL_PATH` to a local Qwen2.5-7B-Instruct folder (and `LLM_ADAPTER_PATH` to a LoRA
+adapter) and `POST /solve` accepts `"backend": "llm"`. The prompt format, training data
+generation, QLoRA training, masked decoding, and Slurm scripts are documented in
+[`docs/llm_runbook.md`](docs/llm_runbook.md) and [`docs/prompt_format.md`](docs/prompt_format.md).
+Weights and adapters stay out of git.
 
 ## Known limits
 
