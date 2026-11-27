@@ -8,8 +8,7 @@ backends scored on the same frozen benchmark:
 - **`mtl`**: a multi-task neural routing policy that covers 16 single-depot variants with one
   model. 100% feasible, +2.9% to PyVRP, about 0.55 s per 100-customer instance.
 - **`llm`**: Qwen2.5-7B-Instruct, scored before and after QLoRA fine-tuning, with and without
-  feasibility-masked decoding. An engineering study inspired by LLMCoSolver, scoped in
-  [`docs/paper_notes.md`](docs/paper_notes.md).
+  feasibility-masked decoding. An engineering study inspired by LLMCoSolver [1].
 
 ## Results
 
@@ -24,13 +23,14 @@ answers against PyVRP run for 20 s per instance. LLM outputs are never repaired.
 | Qwen2.5-7B QLoRA SFT (80k instances) | 0.4% | +11.3% (7 answers) | 8.2 s |
 | Qwen2.5-7B QLoRA SFT + masked decoding | 100% | +24.1% | 7.5 s |
 
-- Fine-tuning cuts the masked gap from +241.5% to +24.1%, ten times smaller. Going from 500
-  to 5,000 training instances per variant, with nearest-customer hints in the prompt, halved
-  it from +51.9%.
-- Unmasked, the model almost never writes a feasible plan: capacity and time windows break
-  most answers. Masked decoding (an action mask over tokens, not a repair step) makes every
-  answer feasible and isolates how good the model's routing choices are.
-- A small specialised policy stays about 21 points closer to PyVRP and 14 times faster than the 7B LLM.
+- Fine-tuning helps a lot: with masked decoding, the gap to PyVRP falls from +241.5%
+  (zero-shot) to +24.1%, ten times smaller. Going from 500 to 5,000 training instances per
+  variant, with nearest-customer hints in the prompt, halved it from +51.9%.
+- Masked decoding (an action mask over tokens, not a repair step) makes every answer feasible
+  and isolates the quality of the model's routing choices. Unmasked, the fine-tuned model
+  still almost never writes a feasible plan: capacity and time windows break most answers.
+- Used as an end-to-end solver, a 7B LLM remains far from classical optimisation algorithms
+  (PyVRP, OR-Tools) and neural routing policies, both on solution quality and on speed.
 
 Every row, per-variant tables, and the error breakdown are in
 [`docs/results.md`](docs/results.md) (MTL) and [`docs/llm_runbook.md`](docs/llm_runbook.md)
@@ -200,6 +200,61 @@ generation, QLoRA training, masked decoding, and Slurm scripts are documented in
 [`docs/llm_runbook.md`](docs/llm_runbook.md) and [`docs/prompt_format.md`](docs/prompt_format.md).
 Weights and adapters stay out of git.
 
-## Known limits
+## Full LLM experiment
 
-- `seed` and `options.timeout_ms` are accepted but not used yet.
+Needs an NVIDIA GPU and the Qwen2.5-7B-Instruct weights (download command in
+[`docs/llm_runbook.md`](docs/llm_runbook.md#download-the-weights)). Run from the repo root:
+
+```bash
+uv sync --group train --group llm --group data --group mtl --extra gpu
+export LLM_MODEL_PATH=artifacts/llm/qwen2.5-7b-instruct
+EVAL="uv run python -m vrp_service.eval.harness --backend llm --warmup 1"
+
+# 1. Training data: 5,000 instances per variant (80,000), labelled by PyVRP (20 s each)
+uv run python -m vrp_service.data.generate --per-variant 5000 --seed 2 --out data/train/n100_5k
+for v in cvrp ovrp vrpb vrpl vrptw ovrptw ovrpb ovrpl vrpbl vrpbtw vrpltw ovrpbl ovrpbtw ovrpltw vrpbltw ovrpbltw; do
+  uv run python -m vrp_service.data.label --root data/train/n100_5k --variant $v --seconds 20
+done
+
+# 2. QLoRA SFT (rerunning the same command resumes from the last checkpoint)
+uv run python -m vrp_service.train.sft \
+  --data data/train/n100_5k --model "$LLM_MODEL_PATH" --out artifacts/llm/adapters/sft-v2
+
+# 3. Evaluation on all 16 variants x 100 instances, one row per command
+$EVAL --out results/llm_zero_shot.jsonl
+LLM_FEW_SHOT=2 $EVAL --out results/llm_few_shot_2.jsonl
+LLM_MASKED=1 $EVAL --out results/llm_zero_shot_masked.jsonl
+LLM_FEW_SHOT=2 LLM_MASKED=1 $EVAL --out results/llm_few_shot_2_masked.jsonl
+LLM_ADAPTER_PATH=artifacts/llm/adapters/sft-v2 $EVAL --out results/llm_lora.jsonl
+LLM_ADAPTER_PATH=artifacts/llm/adapters/sft-v2 LLM_MASKED=1 $EVAL --out results/llm_lora_masked.jsonl
+
+# 4. Tables
+uv run python -m vrp_service.eval.harness --report results/llm_lora_masked.jsonl
+```
+
+Labelling and fine-tuning are the long steps; each eval row is 1,600 generations.
+`scripts/slurm/` wraps the same commands as Slurm jobs (labelling as a 16-task array).
+
+## Key hyper-parameters
+
+| | Setting | Where to change it |
+| --- | --- | --- |
+| Base model | Qwen2.5-7B-Instruct, revision `a09a354` | `LLM_MODEL_PATH`, `--model` |
+| Quantisation (training) | 4-bit NF4, double quantisation, bf16 compute | `src/vrp_service/train/sft.py` |
+| LoRA | rank 64, alpha 64, dropout 0.05, every attention and MLP projection | `src/vrp_service/train/sft.py` |
+| Optimisation | 1 epoch, learning rate 2e-4, cosine schedule, 3% warm-up | `--epochs`, `--lr`; schedule in `sft.py` |
+| Batch | 4 per device × 4 gradient accumulation = 16 | `--batch`, `--grad-accum` |
+| Sequence length | up to 5,120 tokens; loss on the answer only | `--max-length` |
+| Data | 5,000 PyVRP-labelled instances per variant, 10 per variant held out | `generate --per-variant`, `label --seconds`, `sft --holdout` |
+| Prompt | v2: integer node table with the two nearest customers per node | `PROMPT_VERSION` in `src/vrp_service/llm/prompt.py`, text in `configs/prompts/` |
+| Inference | bf16, adapter merged, greedy decoding, up to 1,024 new tokens | `LLM_QUANTIZATION`, `LLM_ADAPTER_PATH`, `LLM_MAX_NEW_TOKENS` |
+| Few-shot / masking | k = 2 solved examples of the same variant; masked decoding on or off | `LLM_FEW_SHOT`, `LLM_MASKED` |
+
+`--…` flags belong to `vrp_service.train.sft` (`--help` lists them); `LLM_…` are environment
+variables read by the eval harness and the API ([`docs/llm_runbook.md`](docs/llm_runbook.md#settings)).
+
+## References
+
+[1] X. Jiang, Y. Wu, M. Li, Z. Cao, and Y. Zhang. *Large Language Models as End-to-end
+Combinatorial Optimization Solvers.* NeurIPS 2025.
+[arXiv:2509.16865](https://arxiv.org/abs/2509.16865)

@@ -5,7 +5,7 @@ output constrained to compact `{"routes": [[int, ...], ...]}` by lm-format-enfor
 defaults are overridden: the schema sets `maxItems` (without it every list stops at 20 items),
 and tokens containing whitespace are banned (otherwise the model can spend its token budget on
 whitespace between JSON tokens). The prompt format is in
-`docs/prompt_format.md`; the scope and the no-repair rule are in `docs/paper_notes.md`.
+`docs/prompt_format.md`.
 
 ## Requirements
 

@@ -12,3 +12,4 @@ results/
 slurm-*.out
 slurm-*.gpu.csv
 data/train/
+docs/paper_notes.md
